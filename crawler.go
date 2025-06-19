@@ -29,6 +29,10 @@ type StepProfilerData struct {
 	Extra   map[string]any
 }
 
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 type Logger interface {
 	Debug(msg string, args ...any)
 	Info(msg string, args ...any)
@@ -115,12 +119,12 @@ type stepExecution struct {
 }
 
 type ApiCrawler struct {
-	clientRoundtripper  http.RoundTripper
 	Config              Config
 	ContextMap          map[string]*Context
 	globalAuthenticator Authenticator
 	DataStream          chan any
 	logger              Logger
+	httpClient          HTTPClient
 	profiler            chan StepProfilerData
 	enableProfilation   bool
 }
@@ -143,11 +147,11 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 	}
 
 	c := &ApiCrawler{
-		clientRoundtripper: http.DefaultTransport,
-		Config:             cfg,
-		ContextMap:         map[string]*Context{},
-		logger:             NewDefaultLogger(),
-		profiler:           nil,
+		httpClient: http.DefaultClient,
+		Config:     cfg,
+		ContextMap: map[string]*Context{},
+		logger:     NewDefaultLogger(),
+		profiler:   nil,
 	}
 
 	// handle stream channel
@@ -176,8 +180,8 @@ func (a *ApiCrawler) SetLogger(logger Logger) {
 	a.logger = logger
 }
 
-func (a *ApiCrawler) SetClientRoundTripper(rt http.RoundTripper) {
-	a.clientRoundtripper = rt
+func (a *ApiCrawler) SetClient(client HTTPClient) {
+	a.httpClient = client
 }
 
 func (a *ApiCrawler) EnableProfiler() chan StepProfilerData {
@@ -353,11 +357,9 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			// apply authentication
 			authenticator.PrepareRequest(req)
 
-			client := &http.Client{Transport: c.clientRoundtripper}
-
 			c.logger.Info("[Request] %s", urlObj.String())
 
-			resp, err := client.Do(req)
+			resp, err := c.httpClient.Do(req)
 			if err != nil {
 				return fmt.Errorf("error performing HTTP request: %w", err)
 			}

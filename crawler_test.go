@@ -6,6 +6,7 @@ package apigorowler
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	crawler_testing "github.com/noi-techpark/go-apigorowler/testing"
@@ -20,7 +21,8 @@ func TestExampleForeachValue(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example_foreach_value.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	err := craw.Run(context.TODO())
 	require.Nil(t, err)
@@ -41,7 +43,8 @@ func TestExampleForeachValueStream(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example_foreach_value_stream.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	stream := craw.GetDataStream()
 	defer close(stream)
@@ -70,7 +73,8 @@ func TestExampleSingle(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example_single.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	err := craw.Run(context.TODO())
 	require.Nil(t, err)
@@ -96,7 +100,8 @@ func TestExample2(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example2.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	err := craw.Run(context.TODO())
 	require.Nil(t, err)
@@ -117,7 +122,8 @@ func TestPaginatedIncrement(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example_pagination_increment.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	err := craw.Run(context.TODO())
 	require.Nil(t, err)
@@ -142,7 +148,8 @@ func TestPaginatedIncrementNested(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example_pagination_increment_nested.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	err := craw.Run(context.TODO())
 	require.Nil(t, err)
@@ -167,7 +174,8 @@ func TestPaginatedIncrementStream(t *testing.T) {
 	})
 
 	craw, _, _ := NewApiCrawler("testing/example_pagination_increment_stream.yaml")
-	craw.SetClientRoundTripper(mockTransport)
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
 
 	stream := craw.GetDataStream()
 	defer close(stream)
