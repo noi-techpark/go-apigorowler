@@ -1,0 +1,68 @@
+name: Build and Release IDE
+
+on:
+  push:
+    tags:
+      - 'ide/v*'
+
+jobs:
+  reuse-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v2
+      - name: REUSE Compliance Check
+        uses: fsfe/reuse-action@v5
+
+  build:
+    needs: reuse-check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.4'
+
+      - name: Build IDE binary
+        run: |
+          cd cmd/ide
+          go mod download
+          output=../../out/go-apigorowler-ide-${{ matrix.goos }}-${{ matrix.goarch }}
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            output="${output}.exe"
+          fi
+          env GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o $output .
+
+      - name: Upload binaries for release
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-apigorowler-ide-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out/go-apigorowler-ide-${{ matrix.goos }}-${{ matrix.goarch }}*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: out
+
+      - name: List downloaded artifacts files
+        run: ls -lR out/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          fail_on_unmatched_files: true
+          files: out/go-apigorowler-ide-*/*

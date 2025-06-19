@@ -1,0 +1,46 @@
+name: Go-Apigorowler Package CI
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'pkg/**'
+      - 'pkg/go.mod'
+      - 'pkg/go.sum'
+  pull_request:
+    paths:
+      - 'pkg/**'
+      - 'pkg/go.mod'
+      - 'pkg/go.sum'
+
+jobs:
+  reuse-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v2
+      - name: REUSE Compliance Check
+        uses: fsfe/reuse-action@v5
+
+  test:
+    runs-on: ubuntu-latest
+    needs: reuse-check
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.4'
+
+      - name: Run go mod download
+        run: |
+          cd pkg
+          go mod download
+
+      - name: Run tests
+        run: |
+          cd pkg
+          go test -v ./...
