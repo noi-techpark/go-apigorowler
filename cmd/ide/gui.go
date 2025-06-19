@@ -17,7 +17,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/gdamore/tcell/v2"
-	crawler "github.com/noi-techpark/go-apigorowler"
+	"github.com/noi-techpark/go-apigorowler"
 	"github.com/rivo/tview"
 	"gopkg.in/yaml.v3"
 )
@@ -56,7 +56,7 @@ type ConsoleApp struct {
 	fullResult     *tview.TextView
 	stepList       *tview.List
 	configFilePath string
-	profilerDAta   []crawler.StepProfilerData
+	profilerDAta   []apigorowler.StepProfilerData
 	stopFn         context.CancelFunc
 }
 
@@ -64,7 +64,7 @@ func NewConsoleApp() *ConsoleApp {
 	return &ConsoleApp{
 		app:          tview.NewApplication(),
 		selectedStep: 0,
-		profilerDAta: make([]crawler.StepProfilerData, 0),
+		profilerDAta: make([]apigorowler.StepProfilerData, 0),
 	}
 }
 
@@ -305,13 +305,13 @@ func (c *ConsoleApp) appendLog(log string) {
 }
 
 func (c *ConsoleApp) setupCrawlJob() {
-	c.profilerDAta = make([]crawler.StepProfilerData, 0)
+	c.profilerDAta = make([]apigorowler.StepProfilerData, 0)
 	if c.stopFn != nil {
 		c.stopFn()
 	}
 
 	go func() {
-		craw, _, _ := crawler.NewApiCrawler(c.configFilePath)
+		craw, _, _ := apigorowler.NewApiCrawler(c.configFilePath)
 		craw.SetLogger(ConsoleLogger{
 			LogFunc: func(msg string) {
 				c.appendLog(msg)
@@ -384,14 +384,14 @@ func (c *ConsoleApp) onConfigFileChanged() {
 		return
 	}
 
-	var cfg crawler.Config
+	var cfg apigorowler.Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {
 		c.appendLog("[red]" + err.Error())
 		return
 	}
 
-	errors := crawler.ValidateConfig(cfg)
+	errors := apigorowler.ValidateConfig(cfg)
 	if len(errors) != 0 {
 		text := "[red]"
 		for _, r := range errors {
