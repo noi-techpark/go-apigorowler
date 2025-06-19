@@ -98,8 +98,7 @@ func (c *ConsoleApp) Run() {
 func (c *ConsoleApp) validateAndGotoIDE(inputField *tview.InputField) {
 	path := inputField.GetText()
 	if _, err := os.Stat(path); err != nil {
-		inputField.SetLabel("Invalid path. Try again: ")
-		c.app.Draw() // Refresh UI after label change
+		inputField.SetLabel("Invalid path. Enter path to configuration file: ")
 		return
 	}
 	c.configFilePath = path
