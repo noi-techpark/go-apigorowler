@@ -8,7 +8,7 @@ import (
 	"context"
 	"testing"
 
-	crawler_testing "github.com/noi-techpark/go-apigorowler/pkg/testing"
+	crawler_testing "github.com/noi-techpark/go-apigorowler/testing"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
