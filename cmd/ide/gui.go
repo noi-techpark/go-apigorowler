@@ -311,7 +311,7 @@ func (c *ConsoleApp) setupCrawlJob() {
 	}
 
 	go func() {
-		craw := crawler.NewApiCrawler(c.configFilePath)
+		craw, _, _ := crawler.NewApiCrawler(c.configFilePath)
 		craw.SetLogger(ConsoleLogger{
 			LogFunc: func(msg string) {
 				c.appendLog(msg)
