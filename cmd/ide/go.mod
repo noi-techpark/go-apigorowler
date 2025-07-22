@@ -5,7 +5,7 @@ go 1.24.4
 require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gdamore/tcell/v2 v2.8.1
-	github.com/noi-techpark/go-apigorowler v0.0.4
+	github.com/noi-techpark/go-apigorowler v0.0.5
 	github.com/rivo/tview v0.0.0-20250501113434-0c592cd31026
 	gopkg.in/yaml.v3 v3.0.1
 )
