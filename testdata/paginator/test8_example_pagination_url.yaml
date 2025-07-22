@@ -1,0 +1,13 @@
+configuration:
+  pagination:
+    nextPageUrlSelector: "body:.next"
+
+httpResults:
+  - body: |
+      {
+        "next": "http://test.com"
+      }
+  - body: "{}"
+
+paginationState:
+  - nextPageUrl: "http://test.com"

@@ -209,7 +209,8 @@ rootContext: []
 
 | Field    | Type                          | Description                         |
 | -------- | ----------------------------- | ----------------------------------- |
-| `params` | array<PaginationParamsStruct> | **Required.** Pagination parameters |
+| `nextPageUrlSelector` | string | **Optional (either nextPageUrlSelector or params).** selector for next page url e.g., `body:<jq-selector>`,  `header:<header-name>` |
+| `params` | array<PaginationParamsStruct> | **Optional (either nextPageUrlSelector or params).** Pagination parameters |
 | `stopOn` | array<PaginationStopsStruct>  | **Required.** Stop conditions       |
 
 ---
@@ -224,7 +225,7 @@ rootContext: []
 | `format`    | string | Optional. Required if `type == datetime` (Go time format)   |
 | `default`   | any    | Optional. Must match the `type`                             |
 | `increment` | string | Optional. Increment step                                    |
-| `source`    | string | Required if `type == dynamic`. e.g., `body:<jq-selector>`   |
+| `source`    | string | Required if `type == dynamic`. e.g., `body:<jq-selector>`,  `header:<header-name>`  |
 
 ---
 
@@ -232,11 +233,11 @@ rootContext: []
 
 | Field        | Type          | Description                                                         |
 | ------------ | ------------- | ------------------------------------------------------------------- |
-| `type`       | string        | **Required.** One of: `responseBody`, `requestParam`                |
+| `type`       | string        | **Required.** One of: `responseBody`, `requestParam`, `pageNum`                |
 | `expression` | jq expression | Required if `type == responseBody`                                  |
 | `param`      | string        | Required if `type == requestParam`                                  |
 | `compare`    | string        | Required if `type == requestParam`. One of: `lt`, `lte`, `eq`, etc. |
-| `value`      | any           | Required if `type == requestParam`                                  |
+| `value`      | any           | Required if `type == requestParam or type == pageNum`                                  |
 
 ---
 

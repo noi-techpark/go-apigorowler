@@ -31,7 +31,7 @@ type Param struct {
 }
 
 type StopCondition struct {
-	Type       string `yaml:"type" json:"type"`             // "responseBody", "requestParam"
+	Type       string `yaml:"type" json:"type"`             // "responseBody", "requestParam", "pageNum"
 	Expression string `yaml:"expression" json:"expression"` // used by jq
 
 	Param   string `yaml:"param,omitempty" json:"param,omitempty"`     // for requestParam
@@ -40,8 +40,9 @@ type StopCondition struct {
 }
 
 type Pagination struct {
-	Params []Param         `yaml:"params" json:"params"`
-	StopOn []StopCondition `yaml:"stopOn" json:"stopOn"`
+	NextPageUrlSelector string          `yaml:"nextPageUrlSelector,omitempty" json:"nextPageUrlSelector,omitempty"` // jq selector to get nextPage url
+	Params              []Param         `yaml:"params,omitempty" json:"params,omitempty"`
+	StopOn              []StopCondition `yaml:"stopOn,omitempty" json:"stopOn,omitempty"`
 }
 
 type ConfigP struct {
@@ -51,15 +52,18 @@ type ConfigP struct {
 type PaginationContext map[string]interface{}
 
 type Paginator struct {
-	config  ConfigP
-	ctx     PaginationContext
-	stopped bool
+	config      ConfigP
+	ctx         PaginationContext
+	stopped     bool
+	pageNum     int
+	nextPageUrl string
 }
 
 type RequestParts struct {
 	QueryParams map[string]string      `yaml:"queryParams"`
 	BodyParams  map[string]interface{} `yaml:"bodyParams"`
 	Headers     map[string]string      `yaml:"headers"`
+	NextPageUrl string                 `yaml:"nextPageUrl"`
 }
 
 // NewPaginator creates a new paginator from YAML config
@@ -67,7 +71,7 @@ func NewPaginator(cfg ConfigP) (*Paginator, error) {
 	p := &Paginator{
 		config:  cfg,
 		ctx:     make(PaginationContext),
-		stopped: len(cfg.Pagination.Params) == 0,
+		stopped: len(cfg.Pagination.Params) == 0 && len(cfg.Pagination.NextPageUrlSelector) == 0,
 	}
 
 	// initialize context
@@ -82,8 +86,13 @@ func NewPaginatorFromFile(yamlData []byte) (*Paginator, error) {
 	}
 	return NewPaginator(cfg)
 }
+
 func (p *Paginator) Ctx() PaginationContext {
 	return p.ctx
+}
+
+func (p *Paginator) PageNum() int {
+	return p.pageNum
 }
 
 func evalSimpleExpr(expression string, val interface{}) (interface{}, error) {
@@ -144,6 +153,8 @@ func (p *Paginator) initializeContext() error {
 }
 
 func (p *Paginator) applyIncrements() error {
+	p.pageNum += 1
+
 	for _, param := range p.config.Pagination.Params {
 		if param.Type == "dynamic" {
 			continue
@@ -218,6 +229,48 @@ func (p *Paginator) extractDynamicParams(body interface{}, headers map[string][]
 		default:
 			return fmt.Errorf("unsupported source type '%s' for param '%s'", sourceType, param.Name)
 		}
+	}
+	return nil
+}
+
+func (p *Paginator) extractNextUrl(body interface{}, headers map[string][]string) error {
+	if len(p.config.Pagination.NextPageUrlSelector) == 0 {
+		return nil
+	}
+
+	sourceParts := strings.SplitN(p.config.Pagination.NextPageUrlSelector, ":", 2)
+	sourceType := sourceParts[0]
+	sourcePath := ""
+	if len(sourceParts) > 1 {
+		sourcePath = sourceParts[1]
+	}
+	switch sourceType {
+	case "body":
+		if sourcePath == "" {
+			return fmt.Errorf("missing jq expression for next url")
+		}
+		val, err := evalJQ(sourcePath, body)
+		if err != nil {
+			return fmt.Errorf("jq error for next url: %w", err)
+		}
+		if casted, ok := val.(string); ok {
+			p.nextPageUrl = casted
+		} else {
+			p.nextPageUrl = ""
+		}
+
+	case "header":
+		if sourcePath == "" {
+			return fmt.Errorf("missing header key for next url")
+		}
+		if val, ok := headers[sourcePath]; ok && len(val) > 0 {
+			p.nextPageUrl = val[0]
+		} else {
+			p.nextPageUrl = ""
+		}
+
+	default:
+		return fmt.Errorf("unsupported source type '%s' for next url", sourceType)
 	}
 	return nil
 }
@@ -419,8 +472,15 @@ func toTime(value any, format string) (time.Time, error) {
 }
 
 func (p *Paginator) shouldStop(body interface{}) (bool, error) {
+	// stop immediately if NextPageUrlSelector is specified but no next token is found
+	if p.config.Pagination.NextPageUrlSelector != "" && p.nextPageUrl == "" {
+		return true, nil
+	}
+
 	for _, cond := range p.config.Pagination.StopOn {
 		switch cond.Type {
+		case "pageNum":
+			return p.pageNum >= cond.Value.(int), nil
 		case "responseBody":
 			res, err := evalJQ(cond.Expression, body)
 			if err != nil {
@@ -485,6 +545,7 @@ func (p *Paginator) NextFromCtx() *RequestParts {
 		QueryParams: q,
 		BodyParams:  b,
 		Headers:     h,
+		NextPageUrl: p.nextPageUrl,
 	}
 }
 
@@ -512,6 +573,10 @@ func (p *Paginator) Next(resp *http.Response) (*RequestParts, bool, error) {
 	headers := map[string][]string(resp.Header)
 
 	if err := p.extractDynamicParams(bodyJSON, headers); err != nil {
+		return nil, false, err
+	}
+
+	if err := p.extractNextUrl(bodyJSON, headers); err != nil {
 		return nil, false, err
 	}
 

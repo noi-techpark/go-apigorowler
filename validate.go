@@ -206,18 +206,24 @@ func validateRequest(req RequestConfig, location string) []ValidationError {
 func validatePagination(p Pagination, location string) []ValidationError {
 	var errs []ValidationError
 
-	if len(p.Params) == 0 {
-		errs = append(errs, ValidationError{"pagination.params must be a non-empty array", location + ".params"})
+	// Either params or nextPageUrlSelector must be provided
+	if len(p.Params) == 0 && p.NextPageUrlSelector == "" {
+		errs = append(errs, ValidationError{"pagination must have either params or nextPageUrlSelector", location})
 	}
+
+	// If Params is provided, validate each
 	for i, param := range p.Params {
 		errs = append(errs, validatePaginationParam(param, fmt.Sprintf("%s.params[%d]", location, i))...)
 	}
-	if len(p.StopOn) == 0 {
-		errs = append(errs, ValidationError{"pagination.stopOn must be a non-empty array", location + ".stopOn"})
+
+	// StopOn must always be non-empty
+	if len(p.StopOn) == 0 && p.NextPageUrlSelector == "" {
+		errs = append(errs, ValidationError{"pagination.stopOn must be a non-empty array if not using 'nextPageUrlSelector'", location + ".stopOn"})
 	}
 	for i, stop := range p.StopOn {
 		errs = append(errs, validatePaginationStop(stop, fmt.Sprintf("%s.stopOn[%d]", location, i))...)
 	}
+
 	return errs
 }
 
@@ -249,13 +255,17 @@ func validatePaginationStop(stop StopCondition, location string) []ValidationErr
 	var errs []ValidationError
 
 	t := strings.ToLower(stop.Type)
-	if t != "responsebody" && t != "requestparam" {
-		errs = append(errs, ValidationError{"pagination stop type must be one of [responseBody, requestParam]", location + ".type"})
+	validTypes := map[string]bool{"responsebody": true, "requestparam": true, "pagenum": true}
+	if !validTypes[t] {
+		errs = append(errs, ValidationError{"pagination stop type must be one of [responseBody, requestParam, pageNum]", location + ".type"})
 	}
 
-	if t == "responsebody" && stop.Expression == "" {
-		errs = append(errs, ValidationError{"pagination stop expression is required when type is responseBody", location + ".expression"})
+	if t == "responsebody" {
+		if stop.Expression == "" {
+			errs = append(errs, ValidationError{"pagination stop expression is required when type is responseBody", location + ".expression"})
+		}
 	}
+
 	if t == "requestparam" {
 		if stop.Param == "" {
 			errs = append(errs, ValidationError{"pagination stop param is required when type is requestParam", location + ".param"})
@@ -272,6 +282,15 @@ func validatePaginationStop(stop StopCondition, location string) []ValidationErr
 		if stop.Value == nil {
 			errs = append(errs, ValidationError{"pagination stop value is required when type is requestParam", location + ".value"})
 		}
+	}
+
+	if t == "pagenum" {
+		// For pageNum type, value is required
+		_, ok := stop.Value.(int)
+		if stop.Value == nil || ok {
+			errs = append(errs, ValidationError{"pagination stop value is required and mut be an int when type is pageNum", location + ".value"})
+		}
+		// No other fields required
 	}
 
 	return errs

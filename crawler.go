@@ -322,7 +322,6 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	}
 
 	// instantiate paginator
-	page := 0
 	paginator, err := NewPaginator(ConfigP{exec.step.Request.Pagination})
 	if err != nil {
 		return fmt.Errorf("error creating request paginator: %w", err)
@@ -336,12 +335,20 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		case <-ctx.Done():
 			return ctx.Err() // Context cancelled
 		default:
-			page += 1
-			// 1. Inject query params
-			urlObj, err := url.Parse(_url)
-			if err != nil {
-				return fmt.Errorf("invalid URL: %w", err)
+			var urlObj *url.URL
+			if len(next.NextPageUrl) == 0 {
+				urlObj, err = url.Parse(_url)
+				if err != nil {
+					return fmt.Errorf("invalid URL %s: %w", _url, err)
+				}
+			} else {
+				urlObj, err = url.Parse(next.NextPageUrl)
+				if err != nil {
+					return fmt.Errorf("invalid next.NextPageUrl URL %s: %w", next.NextPageUrl, err)
+				}
 			}
+
+			// 1. Inject query params
 			query := urlObj.Query()
 			for k, v := range next.QueryParams {
 				query.Set(k, v)
@@ -401,7 +408,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				return fmt.Errorf("error decoding JSON: %w", err)
 			}
 
-			profileStepName := fmt.Sprintf("Request '%s' | page#%d", exec.step.Name, page)
+			profileStepName := fmt.Sprintf("Request '%s' | page#%d", exec.step.Name, paginator.PageNum())
 			c.pushProfilerData(STEP_PROFILER_TYPE_START, profileStepName, exec, raw, nil, "url", urlObj.String())
 
 			// 4. Apply JQ transformer

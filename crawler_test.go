@@ -196,3 +196,25 @@ func TestPaginatedIncrementStream(t *testing.T) {
 
 	assert.Equal(t, expected, data)
 }
+
+func TestPaginatedNextUrl(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://www.onecenter.info/api/DAZ/GetFacilities": "testdata/crawler/next_url/facilities_1.json",
+		"http://list.com/page2":                            "testdata/crawler/next_url/facilities_2.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testing/example_pagination_next.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/next_url/output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}

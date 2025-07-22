@@ -1,0 +1,17 @@
+rootContext: []
+  
+steps:
+  - type: request
+    name: Fetch Facilities
+    request:
+      url: https://www.onecenter.info/api/DAZ/GetFacilities
+      method: GET
+      headers:
+        Accept: application/json
+      body:
+
+      pagination:
+        nextPageUrlSelector: "body:.nextpage"
+
+    resultTransformer: .data
+    

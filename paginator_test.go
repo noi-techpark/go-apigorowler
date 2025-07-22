@@ -190,3 +190,11 @@ func TestDatetimeNow(t *testing.T) {
 func TestDatetimeNowMultiStop(t *testing.T) {
 	runPaginatorTest(t, "testdata/paginator/test7_now_datetime_multistop.yaml", 2)
 }
+
+func TestNextUrlSelector(t *testing.T) {
+	runPaginatorTest(t, "testdata/paginator/test8_example_pagination_url.yaml", 2)
+}
+
+func TestStopOnPageNum(t *testing.T) {
+	runPaginatorTest(t, "testdata/paginator/test9_stop_on_iteration.yaml", 3)
+}
