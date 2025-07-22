@@ -21,6 +21,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/noi-techpark/go-apigorowler"
 	"github.com/rivo/tview"
+	"github.com/sergi/go-diff/diffmatchpatch"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,6 +33,33 @@ func escapeBrackets(input string) string {
 		"[", "[\u200B",
 		"]", "\u200B]",
 	).Replace(input)
+}
+
+// Generate a tview-color-tagged diff from before/after strings
+func getColoredDiff(before, after string) string {
+	// If there's no previous content, treat all as new
+	if before == "" {
+		return escapeBrackets(after)
+	}
+
+	dmp := diffmatchpatch.New()
+	diffs := dmp.DiffMain(before, after, false)
+
+	var result strings.Builder
+	for _, d := range diffs {
+		switch d.Type {
+		case diffmatchpatch.DiffInsert:
+			// Green background for additions
+			result.WriteString(`[black:green]` + escapeBrackets(d.Text) + `[-:-:-]`)
+		case diffmatchpatch.DiffDelete:
+			// Red background for deletions
+			result.WriteString(`[white:red]` + escapeBrackets(d.Text) + `[-:-:-]`)
+		case diffmatchpatch.DiffEqual:
+			// Default formatting for unchanged
+			result.WriteString(escapeBrackets(d.Text))
+		}
+	}
+	return result.String()
 }
 
 type ConsoleLogger struct {
@@ -66,7 +94,7 @@ type ConsoleApp struct {
 	execLog        *tview.TextView
 	description    *tview.TextView
 	stepOutput     *tview.TextView
-	stepList       *tview.List
+	steps          *tview.TreeView
 	configFilePath string
 	profilerData   []apigorowler.StepProfilerData
 	stopFn         context.CancelFunc
@@ -168,9 +196,10 @@ func (c *ConsoleApp) gotoIDE(path string) {
 	c.stepOutput.SetBorder(true)
 	c.stepOutput.SetTitle("Output")
 
-	c.stepList = tview.NewList()
-	c.stepList.SetBorder(true)
-	c.stepList.SetTitle("Steps")
+	root := tview.NewTreeNode("").SetSelectable(false)
+	c.steps = tview.NewTreeView().SetRoot(root)
+	c.steps.SetBorder(true)
+	c.steps.SetTitle("Steps")
 
 	c.app.EnableMouse(true)
 
@@ -204,7 +233,7 @@ func (c *ConsoleApp) gotoIDE(path string) {
 		return event
 	})
 
-	focusOrder := []tview.Primitive{c.stepList, c.stepOutput}
+	focusOrder := []tview.Primitive{c.steps, c.stepOutput}
 	currentFocus := 0
 
 	c.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -216,37 +245,19 @@ func (c *ConsoleApp) gotoIDE(path string) {
 		return event
 	})
 
-	c.stepList.SetChangedFunc(func(index int, _ string, _ string, _ rune) {
-		if index < 0 || index >= len(c.profilerData) {
-			return // avoid panic
+	c.steps.SetSelectedFunc(func(node *tview.TreeNode) {
+		if len(node.GetChildren()) > 0 {
+			node.SetExpanded(!node.IsExpanded())
 		}
-
-		c.mutex.Lock()
-		defer c.mutex.Unlock()
-		c.selectedStep = index
-		data := c.profilerData[index]
-		conf, _ := json.MarshalIndent(data.Config, "", "  ")
-		// ctx, _ := json.MarshalIndent(data.Context, "", "  ")
-
-		descriptionText := ""
-		descriptionText += fmt.Sprintf("[green]Step Name:[white:#308003]%s[-:-:-:-]\n", data.Name)
-		for k, v := range data.Extra {
-			descriptionText += fmt.Sprintf("[green]%s:[white:#308003]%s[-:-:-:-]\n", k, v)
-		}
-		descriptionText += fmt.Sprintf("[green]Step Configuration:\n[white:#308003]%s[-:-:-:-]\n", escapeBrackets(string(conf)))
-
-		c.description.SetText(descriptionText)
-		c.stepOutput.SetText(data.DataString)
-
-		c.description.ScrollToBeginning()
-		c.stepOutput.ScrollToBeginning()
 	})
+
+	c.steps.SetChangedFunc(c.updateOnChangeStepNode)
 
 	center := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(c.description, 0, 1, false)
 
 	mainFlex := tview.NewFlex().
-		AddItem(c.stepList, 50, 1, true).
+		AddItem(c.steps, 50, 1, true).
 		AddItem(center, 0, 2, false).
 		AddItem(c.stepOutput, 0, 3, false)
 
@@ -260,7 +271,7 @@ func (c *ConsoleApp) gotoIDE(path string) {
 		AddItem(mainFlex, 0, 1, true)
 
 	// Switch UI to main layout (no second Run call!)
-	c.app.SetRoot(layout, true).SetFocus(c.stepList)
+	c.app.SetRoot(layout, true).SetFocus(c.steps)
 
 	go func() {
 		for {
@@ -282,6 +293,40 @@ func (c *ConsoleApp) gotoIDE(path string) {
 			}
 		}
 	}()
+}
+
+func (c *ConsoleApp) updateOnChangeStepNode(node *tview.TreeNode) {
+	ref := node.GetReference()
+	if ref == nil {
+		return
+	}
+
+	// You must store the original index or StepProfilerData on the node
+	data, ok := ref.(apigorowler.StepProfilerData)
+	if !ok {
+		return
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	c.description.ScrollToBeginning()
+	c.stepOutput.ScrollToBeginning()
+
+	// Format config
+	conf, _ := json.MarshalIndent(data.Config, "", "  ")
+
+	// Build description text
+	descriptionText := ""
+	descriptionText += fmt.Sprintf("[green]Step Name:[-:-:-:-]%s\n", data.Name)
+	descriptionText += fmt.Sprintf("[green]Step Configuration:\n[-:-:-:-]%s\n", escapeBrackets(string(conf)))
+	descriptionText += "\n"
+	for k, v := range data.Extra {
+		descriptionText += fmt.Sprintf("[green]%s:\n[-:-:-:-]%s\n\n", k, v)
+	}
+
+	c.description.SetText(descriptionText)
+	c.stepOutput.SetText(data.DataString)
 }
 
 func (c *ConsoleApp) appendLog(log string) {
@@ -319,14 +364,51 @@ func (c *ConsoleApp) setupCrawlJob() {
 		craw.SetLogger(logger)
 		profiler := craw.EnableProfiler()
 		defer close(profiler)
+
 		go func() {
+			nodeStack := []*tview.TreeNode{c.steps.GetRoot()} // root as initial parent
+
 			for d := range profiler {
+				if d.Type == apigorowler.STEP_PROFILER_TYPE_END_SILENT {
+					// End nesting — pop the current parent (but never pop root)
+					if len(nodeStack) > 1 {
+						nodeStack = nodeStack[:len(nodeStack)-1]
+					}
+					continue
+				}
+				// Marshal Data into string
 				dataString, _ := json.MarshalIndent(d.Data, "", "  ")
+				if d.DataBefore != nil {
+					dataStringBefore, _ := json.MarshalIndent(d.DataBefore, "", "  ")
+					d.Extra["Step Diff with prev"] = (getColoredDiff(string(dataStringBefore), string(dataString)))
+				}
 				d.DataString = escapeBrackets(string(dataString))
 
 				c.profilerData = append(c.profilerData, d)
-				c.stepList.AddItem(d.Name, "", 0, nil)
-				c.stepList.SetCurrentItem(-1)
+
+				// Create the tree node with reference to the data
+				node := tview.NewTreeNode(d.Name).
+					SetReference(d).
+					SetSelectable(true)
+
+				// Append to current parent node
+				currentParent := nodeStack[len(nodeStack)-1]
+				currentParent.AddChild(node)
+				c.steps.SetCurrentNode(node)
+				c.updateOnChangeStepNode(node)
+
+				switch d.Type {
+				case apigorowler.STEP_PROFILER_TYPE_START:
+					// Start a nested block — push this node as new parent
+					nodeStack = append(nodeStack, node)
+				case apigorowler.STEP_PROFILER_TYPE_END:
+					// End nesting — pop the current parent (but never pop root)
+					if len(nodeStack) > 1 {
+						nodeStack = nodeStack[:len(nodeStack)-1]
+					}
+				case apigorowler.STEP_PROFILER_TYPE_NONE:
+					// Do nothing, stay at same level
+				}
 			}
 		}()
 
@@ -357,7 +439,12 @@ func (c *ConsoleApp) setupCrawlJob() {
 				})
 			} else {
 				close(craw.GetDataStream())
-				c.profilerData[len(c.profilerData)-1].Data = streamedData
+				// Get the last profiler entry
+				lastIndex := len(c.profilerData) - 1
+				lastData := c.profilerData[lastIndex]
+
+				// Update its data string
+				lastData.Data = streamedData
 
 				outputText := ""
 				for _, d := range streamedData {
@@ -367,11 +454,32 @@ func (c *ConsoleApp) setupCrawlJob() {
 					}
 					outputText += string(output)
 				}
-				c.profilerData[len(c.profilerData)-1].DataString = escapeBrackets(outputText)
+				lastData.DataString = escapeBrackets(outputText)
+				c.profilerData[lastIndex] = lastData // reassign (if you're using value semantics)
 
-				c.stepList.RemoveItem(-1)
-				c.stepList.AddItem(c.profilerData[len(c.profilerData)-1].Name, "", 0, nil)
-				c.stepList.SetCurrentItem(-1)
+				// -------- Update the Tree Node --------
+
+				// Assuming you stored node references or can traverse to the last added node:
+				var updateLastNode func(node *tview.TreeNode) bool
+				updateLastNode = func(node *tview.TreeNode) bool {
+					children := node.GetChildren()
+					if len(children) == 0 {
+						return false
+					}
+					lastChild := children[len(children)-1]
+					if len(lastChild.GetChildren()) == 0 {
+						// It's a leaf node, update it
+						lastChild.SetReference(lastData)
+						c.steps.SetCurrentNode(lastChild)
+						c.updateOnChangeStepNode(lastChild)
+						return true
+					}
+					return updateLastNode(lastChild)
+				}
+
+				// Start recursive search from the root
+				updateLastNode(c.steps.GetRoot())
+
 			}
 			c.appendLog("[green]Crawler run completed successfully")
 		}
@@ -381,7 +489,7 @@ func (c *ConsoleApp) setupCrawlJob() {
 func (c *ConsoleApp) onConfigFileChanged() {
 	c.description.SetText("")
 	c.stepOutput.SetText("")
-	c.stepList.Clear()
+	c.steps.GetRoot().ClearChildren()
 
 	data, err := os.ReadFile(c.configFilePath)
 	if err != nil {
@@ -440,29 +548,43 @@ func (c *ConsoleApp) dumpStepsToLog() {
 	defer c.mutex.Unlock()
 
 	sanitizeFilename := func(name string) string {
-		// Replace all whitespace with _
 		name = strings.ReplaceAll(name, " ", "_")
-
-		// Remove invalid filename characters: \ / : * ? " < > |
-		invalidChars := regexp.MustCompile(`[\\/:*?"<>|]'`)
+		invalidChars := regexp.MustCompile(`[\\/:*?"<>|]`)
 		name = invalidChars.ReplaceAllString(name, "")
-
 		return name
 	}
 
+	depth := 0
+
 	for i, step := range c.profilerData {
+		// Apply prefix
+		prefix := strings.Repeat("__", depth)
+		prefixedName := prefix + step.Name
+
+		// Marshal step data
 		b, err := json.MarshalIndent(step, "", "  ")
 		if err != nil {
 			c.appendLog(fmt.Sprintf("[red]Failed to marshal step %d: %v", i, err))
 			continue
 		}
 
-		escapedStepName := sanitizeFilename(step.Name)
+		// Sanitize name and write
+		escapedStepName := sanitizeFilename(prefixedName)
 		filename := filepath.Join(dumpDir, fmt.Sprintf("%d_%s.json", i, escapedStepName))
 		err = os.WriteFile(filename, b, 0644)
 		if err != nil {
 			c.appendLog(fmt.Sprintf("[red]Failed to write step %d: %v", i, err))
 			continue
+		}
+
+		// Adjust depth AFTER writing (based on type)
+		switch step.Type {
+		case apigorowler.STEP_PROFILER_TYPE_START:
+			depth++
+		case apigorowler.STEP_PROFILER_TYPE_END:
+			if depth > 0 {
+				depth--
+			}
 		}
 	}
 
