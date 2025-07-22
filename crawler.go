@@ -16,17 +16,19 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/itchyny/gojq"
 	"gopkg.in/yaml.v3"
 )
 
 type StepProfilerData struct {
-	Name    string
-	Config  Step
-	Data    any
-	Context Context
-	Extra   map[string]any
+	Name       string
+	Config     Step
+	Data       any
+	DataString string
+	Context    Context
+	Extra      map[string]any
 }
 
 type HTTPClient interface {
@@ -213,9 +215,17 @@ func (a *ApiCrawler) pushProfilerData(name string, exec *stepExecution, Data any
 		return
 	}
 
-	// Defensive copy of step, with Steps cleared
-	cleanConfig, _ := deepCopy(exec.step)
-	cleanConfig.Steps = make([]Step, 0)
+	cleanConfig := Step{}
+	context := Context{}
+	if exec != nil {
+		// Defensive copy of step, with Steps cleared
+		cleanConfig, _ = deepCopy(exec.step)
+		cleanConfig.Steps = make([]Step, 0)
+
+		context = *exec.currentContext
+
+		name = strings.Repeat("   > ", exec.currentContext.depth) + name
+	}
 
 	// Convert variadic args into map[string]any
 	extraMap := make(map[string]any)
@@ -229,7 +239,7 @@ func (a *ApiCrawler) pushProfilerData(name string, exec *stepExecution, Data any
 
 	d := StepProfilerData{
 		Name:    name,
-		Context: *exec.currentContext,
+		Context: context,
 		Data:    Data,
 		Config:  cleanConfig,
 		Extra:   extraMap,
@@ -264,6 +274,8 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 			return err
 		}
 	}
+
+	c.pushProfilerData("Result", nil, c.GetData())
 	return nil
 }
 
@@ -300,6 +312,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	}
 
 	// instantiate paginator
+	page := 0
 	paginator, err := NewPaginator(ConfigP{exec.step.Request.Pagination})
 	if err != nil {
 		return fmt.Errorf("error creating request paginator: %w", err)
@@ -313,6 +326,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		case <-ctx.Done():
 			return ctx.Err() // Context cancelled
 		default:
+			page += 1
 			// 1. Inject query params
 			urlObj, err := url.Parse(_url)
 			if err != nil {
@@ -377,7 +391,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				return fmt.Errorf("error decoding JSON: %w", err)
 			}
 
-			profileStepName := fmt.Sprintf("Request '%s'", exec.step.Name)
+			profileStepName := fmt.Sprintf("Request '%s' | page#%d", exec.step.Name, page)
 			c.pushProfilerData(profileStepName, exec, raw, "url", urlObj.String())
 
 			// 4. Apply JQ transformer
@@ -414,8 +428,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				transformed = singleResult
 			}
 
-			profileStepName = fmt.Sprintf("Request Transfomerd '%s'", exec.step.Name)
-			c.pushProfilerData(profileStepName, exec, transformed, "url", urlObj.String())
+			c.pushProfilerData("   Response Transformation", exec, transformed, "url", urlObj.String())
 
 			// 1. Explicit merge rule (advanced use)
 			if exec.step.MergeOn != "" {
@@ -469,9 +482,11 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				}
 			}
 
-			profileStepName = fmt.Sprintf("Request Merged '%s'", exec.step.Name)
-			c.pushProfilerData(profileStepName, exec, exec.currentContext.Data, "url", urlObj.String())
+			c.pushProfilerData("   Response Merge", exec, exec.currentContext.Data, "url", urlObj.String())
 
+			// trick to properly set nested foreach depth.
+			// Foreach uses the same context when extracting and building nested context, therefore we increment depth manually
+			exec.currentContext.depth += 1
 			for _, step := range exec.step.Steps {
 				newExec := newStepExecution(step, exec.currentContextKey, exec.contextMap)
 				// newExec := newStepExecution(step, exec.currentContextKey, c.ContextMap)
@@ -479,14 +494,17 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 					return err
 				}
 			}
+			// restore original depth
+			exec.currentContext.depth -= 1
 
 			// at this point all inner steps have been executed for all entries in this call
 			// the tree has been completely retrieved and we can check the stream
 			if exec.currentContext.depth == 0 && c.Config.Stream {
 				// No need to check conversion since rootContext is enforced to be an array
 				array_data := exec.currentContext.Data.([]interface{})
-				for _, d := range array_data {
+				for i, d := range array_data {
 					c.DataStream <- d
+					c.pushProfilerData(fmt.Sprintf("   Stream result #%d", i), exec, d, "url", urlObj.String())
 				}
 
 				// reset data
@@ -551,8 +569,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 			childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
 
-			profileStepName := fmt.Sprintf("Foreach [%d] '%s'", i, exec.step.Name)
-			c.pushProfilerData(profileStepName, exec, item)
+			c.pushProfilerData(fmt.Sprintf("   Selection #%d", i), exec, item)
 
 			for _, nested := range exec.step.Steps {
 				newExec := newStepExecution(nested, exec.step.As, childContextMap)
@@ -561,9 +578,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 				}
 			}
 
-			profileStepName = fmt.Sprintf("Foreach [%d] Result '%s'", i, exec.step.Name)
-			c.pushProfilerData(profileStepName, exec, childContextMap[exec.step.As].Data)
-
+			c.pushProfilerData(fmt.Sprintf("   Result #%d", i), exec, childContextMap[exec.step.As].Data)
 			executionResults = append(executionResults, childContextMap[exec.step.As].Data)
 		}
 	}
@@ -593,16 +608,17 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	// Assign new patched data
 	exec.currentContext.Data = v
 
-	profileStepName = fmt.Sprintf("Foreach Merged '%s'", exec.step.Name)
+	profileStepName = fmt.Sprintf("Foreach Merge '%s'", exec.step.Name)
 	c.pushProfilerData(profileStepName, exec, exec.currentContext.Data)
 
 	// at this point all inner steps have been executed for all entries in this call
 	// the tree has been completely retrieved and we can check the stream
-	if exec.currentContext.depth == 0 && c.Config.Stream {
+	if exec.currentContext.depth <= 1 && c.Config.Stream {
 		// No need to check conversion since rootContext is enforced to be an array
 		array_data := exec.currentContext.Data.([]interface{})
-		for _, d := range array_data {
+		for i, d := range array_data {
 			c.DataStream <- d
+			c.pushProfilerData(fmt.Sprintf("   Stream result #%d", i), exec, d)
 		}
 
 		// reset data

@@ -11,6 +11,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -25,24 +27,35 @@ import (
 var debounceTimer *time.Timer
 var debounceMutex sync.Mutex
 
+func escapeBrackets(input string) string {
+	return strings.NewReplacer(
+		"[", "[\u200B",
+		"]", "\u200B]",
+	).Replace(input)
+}
+
 type ConsoleLogger struct {
 	LogFunc func(msg string)
 }
 
 func (cl ConsoleLogger) Info(msg string, args ...any) {
-	cl.LogFunc(fmt.Sprintf("[INFO] "+msg, args...))
+	escaped := escapeBrackets(fmt.Sprintf(msg, args...))
+	cl.LogFunc("[INFO] " + escaped)
 }
 
 func (cl ConsoleLogger) Debug(msg string, args ...any) {
-	cl.LogFunc(fmt.Sprintf("[#bdc9c4] "+msg, args...))
+	escaped := escapeBrackets(fmt.Sprintf(msg, args...))
+	cl.LogFunc("[#bdc9c4] " + escaped)
 }
 
 func (cl ConsoleLogger) Warning(msg string, args ...any) {
-	cl.LogFunc(fmt.Sprintf("[orange] "+msg, args...))
+	escaped := escapeBrackets(fmt.Sprintf(msg, args...))
+	cl.LogFunc("[orange] " + escaped)
 }
 
 func (cl ConsoleLogger) Error(msg string, args ...any) {
-	cl.LogFunc(fmt.Sprintf("[red] "+msg, args...))
+	escaped := escapeBrackets(fmt.Sprintf(msg, args...))
+	cl.LogFunc("[red] " + escaped)
 }
 
 type ConsoleApp struct {
@@ -52,19 +65,25 @@ type ConsoleApp struct {
 	mutex          sync.Mutex
 	execLog        *tview.TextView
 	description    *tview.TextView
-	partialResult  *tview.TextView
-	fullResult     *tview.TextView
+	stepOutput     *tview.TextView
 	stepList       *tview.List
 	configFilePath string
-	profilerDAta   []apigorowler.StepProfilerData
+	profilerData   []apigorowler.StepProfilerData
 	stopFn         context.CancelFunc
+}
+
+func recoverAndLog(logger ConsoleLogger) {
+	if r := recover(); r != nil {
+		stack := debug.Stack()
+		logger.Error("Recovered from panic: %v\nStack Trace:\n%s", r, string(stack))
+	}
 }
 
 func NewConsoleApp() *ConsoleApp {
 	return &ConsoleApp{
 		app:          tview.NewApplication(),
 		selectedStep: 0,
-		profilerDAta: make([]apigorowler.StepProfilerData, 0),
+		profilerData: make([]apigorowler.StepProfilerData, 0),
 	}
 }
 
@@ -143,17 +162,11 @@ func (c *ConsoleApp) gotoIDE(path string) {
 	c.description.SetBorder(true)
 	c.description.SetTitle("Step Context")
 
-	c.partialResult = tview.NewTextView()
-	c.partialResult.SetDynamicColors(true)
-	c.partialResult.SetScrollable(true)
-	c.partialResult.SetBorder(true)
-	c.partialResult.SetTitle("Step Output")
-
-	c.fullResult = tview.NewTextView()
-	c.fullResult.SetDynamicColors(true)
-	c.fullResult.SetScrollable(true)
-	c.fullResult.SetBorder(true)
-	c.fullResult.SetTitle("Result")
+	c.stepOutput = tview.NewTextView()
+	c.stepOutput.SetDynamicColors(true)
+	c.stepOutput.SetScrollable(true)
+	c.stepOutput.SetBorder(true)
+	c.stepOutput.SetTitle("Output")
 
 	c.stepList = tview.NewList()
 	c.stepList.SetBorder(true)
@@ -161,17 +174,17 @@ func (c *ConsoleApp) gotoIDE(path string) {
 
 	c.app.EnableMouse(true)
 
-	c.fullResult.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		x, y := c.fullResult.GetScrollOffset()
+	c.stepOutput.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		x, y := c.stepOutput.GetScrollOffset()
 		switch event.Key() {
 		case tcell.KeyUp:
-			c.fullResult.ScrollTo(x, y-1)
+			c.stepOutput.ScrollTo(x, y-1)
 		case tcell.KeyDown:
-			c.fullResult.ScrollTo(x, y+1)
+			c.stepOutput.ScrollTo(x, y+1)
 		case tcell.KeyPgUp:
-			c.fullResult.ScrollTo(x, y-5)
+			c.stepOutput.ScrollTo(x, y-5)
 		case tcell.KeyPgDn:
-			c.fullResult.ScrollTo(x, y+5)
+			c.stepOutput.ScrollTo(x, y+5)
 		}
 		return event
 	})
@@ -191,22 +204,7 @@ func (c *ConsoleApp) gotoIDE(path string) {
 		return event
 	})
 
-	c.partialResult.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		x, y := c.partialResult.GetScrollOffset()
-		switch event.Key() {
-		case tcell.KeyUp:
-			c.partialResult.ScrollTo(x, y-1)
-		case tcell.KeyDown:
-			c.partialResult.ScrollTo(x, y+1)
-		case tcell.KeyPgUp:
-			c.partialResult.ScrollTo(x, y-5)
-		case tcell.KeyPgDn:
-			c.partialResult.ScrollTo(x, y+5)
-		}
-		return event
-	})
-
-	focusOrder := []tview.Primitive{c.stepList, c.partialResult, c.fullResult}
+	focusOrder := []tview.Primitive{c.stepList, c.stepOutput}
 	currentFocus := 0
 
 	c.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -219,41 +217,38 @@ func (c *ConsoleApp) gotoIDE(path string) {
 	})
 
 	c.stepList.SetChangedFunc(func(index int, _ string, _ string, _ rune) {
-		if index < 0 || index >= len(c.profilerDAta) {
+		if index < 0 || index >= len(c.profilerData) {
 			return // avoid panic
 		}
 
 		c.mutex.Lock()
 		defer c.mutex.Unlock()
 		c.selectedStep = index
-		data := c.profilerDAta[index]
+		data := c.profilerData[index]
 		conf, _ := json.MarshalIndent(data.Config, "", "  ")
 		// ctx, _ := json.MarshalIndent(data.Context, "", "  ")
-		d, _ := json.MarshalIndent(data.Data, "", "  ")
+
 		descriptionText := ""
 		descriptionText += fmt.Sprintf("[green]Step Name:[white:#308003]%s[-:-:-:-]\n", data.Name)
 		for k, v := range data.Extra {
 			descriptionText += fmt.Sprintf("[green]%s:[white:#308003]%s[-:-:-:-]\n", k, v)
 		}
-		descriptionText += fmt.Sprintf("[green]Step Configuration:\n[white:#308003]%s[-:-:-:-]\n", conf)
+		descriptionText += fmt.Sprintf("[green]Step Configuration:\n[white:#308003]%s[-:-:-:-]\n", escapeBrackets(string(conf)))
 
-		escapedDescription := strings.NewReplacer("[]", "[[]").Replace(descriptionText)
-		escapedPartial := strings.NewReplacer("[]", "[[]").Replace(string(d))
-		c.description.SetText(escapedDescription)
-		c.partialResult.SetText(escapedPartial)
+		c.description.SetText(descriptionText)
+		c.stepOutput.SetText(data.DataString)
 
 		c.description.ScrollToBeginning()
-		c.partialResult.ScrollToBeginning()
+		c.stepOutput.ScrollToBeginning()
 	})
 
 	center := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(c.description, 0, 1, false).
-		AddItem(c.partialResult, 0, 1, false)
+		AddItem(c.description, 0, 1, false)
 
 	mainFlex := tview.NewFlex().
 		AddItem(c.stepList, 50, 1, true).
 		AddItem(center, 0, 2, false).
-		AddItem(c.fullResult, 0, 3, false)
+		AddItem(c.stepOutput, 0, 3, false)
 
 	execRow := tview.NewFlex().
 		AddItem(c.execLog, 0, 1, false).
@@ -304,24 +299,34 @@ func (c *ConsoleApp) appendLog(log string) {
 }
 
 func (c *ConsoleApp) setupCrawlJob() {
-	c.profilerDAta = make([]apigorowler.StepProfilerData, 0)
+	c.profilerData = make([]apigorowler.StepProfilerData, 0)
 	if c.stopFn != nil {
 		c.stopFn()
 	}
 
 	go func() {
-		craw, _, _ := apigorowler.NewApiCrawler(c.configFilePath)
-		craw.SetLogger(ConsoleLogger{
+		logger := ConsoleLogger{
 			LogFunc: func(msg string) {
 				c.appendLog(msg)
 			},
-		})
+		}
+		defer recoverAndLog(logger)
+
+		// accuumulator for stream data
+		streamedData := make([]interface{}, 0)
+
+		craw, _, _ := apigorowler.NewApiCrawler(c.configFilePath)
+		craw.SetLogger(logger)
 		profiler := craw.EnableProfiler()
 		defer close(profiler)
 		go func() {
 			for d := range profiler {
-				c.profilerDAta = append(c.profilerDAta, d)
+				dataString, _ := json.MarshalIndent(d.Data, "", "  ")
+				d.DataString = escapeBrackets(string(dataString))
+
+				c.profilerData = append(c.profilerData, d)
 				c.stepList.AddItem(d.Name, "", 0, nil)
+				c.stepList.SetCurrentItem(-1)
 			}
 		}()
 
@@ -334,16 +339,7 @@ func (c *ConsoleApp) setupCrawlJob() {
 			stream := craw.GetDataStream()
 			go func() {
 				for d := range stream {
-					old := c.fullResult.GetText(false)
-
-					output, _ := json.MarshalIndent(d, "", "   ")
-					escapedresult := strings.NewReplacer("[]", "[[]").Replace(string(output))
-					newTest := old
-					if len(old) != 0 {
-						newTest += "\n---\n"
-					}
-					newTest += escapedresult
-					c.fullResult.SetText(newTest)
+					streamedData = append(streamedData, d)
 				}
 			}()
 		}
@@ -351,17 +347,31 @@ func (c *ConsoleApp) setupCrawlJob() {
 		err := craw.Run(ctx)
 
 		if err != nil {
-			c.appendLog("[red]" + err.Error())
+			c.appendLog("[red]" + escapeBrackets(err.Error()))
 		} else {
 			if !craw.Config.Stream {
 				res := craw.GetData()
 				c.app.QueueUpdateDraw(func() {
 					output, _ := json.MarshalIndent(res, "", "   ")
-					escapedresult := strings.NewReplacer("[]", "[[]").Replace(string(output))
-					c.fullResult.SetText(escapedresult)
+					c.stepOutput.SetText(escapeBrackets(string(output)))
 				})
 			} else {
 				close(craw.GetDataStream())
+				c.profilerData[len(c.profilerData)-1].Data = streamedData
+
+				outputText := ""
+				for _, d := range streamedData {
+					output, _ := json.MarshalIndent(d, "", "   ")
+					if len(outputText) != 0 {
+						outputText += "\n---\n"
+					}
+					outputText += string(output)
+				}
+				c.profilerData[len(c.profilerData)-1].DataString = escapeBrackets(outputText)
+
+				c.stepList.RemoveItem(-1)
+				c.stepList.AddItem(c.profilerData[len(c.profilerData)-1].Name, "", 0, nil)
+				c.stepList.SetCurrentItem(-1)
 			}
 			c.appendLog("[green]Crawler run completed successfully")
 		}
@@ -370,8 +380,7 @@ func (c *ConsoleApp) setupCrawlJob() {
 
 func (c *ConsoleApp) onConfigFileChanged() {
 	c.description.SetText("")
-	c.partialResult.SetText("")
-	c.fullResult.SetText("")
+	c.stepOutput.SetText("")
 	c.stepList.Clear()
 
 	data, err := os.ReadFile(c.configFilePath)
@@ -386,7 +395,7 @@ func (c *ConsoleApp) onConfigFileChanged() {
 	var cfg apigorowler.Config
 	err = yaml.Unmarshal(data, &cfg)
 	if err != nil {
-		c.appendLog("[red]" + err.Error())
+		c.appendLog("[red]" + escapeBrackets(err.Error()))
 		return
 	}
 
@@ -430,14 +439,26 @@ func (c *ConsoleApp) dumpStepsToLog() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	for i, step := range c.profilerDAta {
+	sanitizeFilename := func(name string) string {
+		// Replace all whitespace with _
+		name = strings.ReplaceAll(name, " ", "_")
+
+		// Remove invalid filename characters: \ / : * ? " < > |
+		invalidChars := regexp.MustCompile(`[\\/:*?"<>|]'`)
+		name = invalidChars.ReplaceAllString(name, "")
+
+		return name
+	}
+
+	for i, step := range c.profilerData {
 		b, err := json.MarshalIndent(step, "", "  ")
 		if err != nil {
 			c.appendLog(fmt.Sprintf("[red]Failed to marshal step %d: %v", i, err))
 			continue
 		}
 
-		filename := filepath.Join(dumpDir, fmt.Sprintf("step_%d.json", i))
+		escapedStepName := sanitizeFilename(step.Name)
+		filename := filepath.Join(dumpDir, fmt.Sprintf("%d_%s.json", i, escapedStepName))
 		err = os.WriteFile(filename, b, 0644)
 		if err != nil {
 			c.appendLog(fmt.Sprintf("[red]Failed to write step %d: %v", i, err))
@@ -446,7 +467,7 @@ func (c *ConsoleApp) dumpStepsToLog() {
 	}
 
 	go func() {
-		c.appendLog(fmt.Sprintf("[green]Dumped %d steps to %s", len(c.profilerDAta), dumpDir))
+		c.appendLog(fmt.Sprintf("[green]Dumped %d steps to %s", len(c.profilerData), dumpDir))
 	}()
 }
 
