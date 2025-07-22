@@ -270,4 +270,5 @@ For best practices:
 * Keep `auth` and `headers` global unless overrides are needed
 * Use `mergeWithParentOn` and `mergeOn` thoughtfully to preserve context integrity
 
+## Debug & development
 (cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2)
