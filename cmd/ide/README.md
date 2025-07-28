@@ -2,6 +2,8 @@
 
 The Go-Apigorowler IDE provides an interactive environment to develop and test ApiGorowler YAML configurations.
 
+![ide](../../assets/ide_showcase.gif)
+
 ---
 
 ## How it works

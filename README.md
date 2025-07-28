@@ -20,6 +20,11 @@ ApiGorowler also supports:
 
 To simplify development, ApiGorowler includes a **configuration builder CLI tool**, written in Go, that enables real-time execution and inspection of the configuration. This tool helps developers debug and refine their manifests by visualizing intermediate steps.
 
+The library comes with a [developer IDE](cmd/ide/) which helps in building, debugging and analyze crawl configuration.
+
+![ide](assets/ide_showcase.gif)
+
+
 ---
 
 ## Features
