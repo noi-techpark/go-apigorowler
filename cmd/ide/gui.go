@@ -128,10 +128,7 @@ func (c *ConsoleApp) Run() {
 		})
 
 	form := tview.NewForm().
-		AddFormItem(inputField).
-		AddButton("OK", func() {
-			c.validateAndGotoIDE(inputField)
-		})
+		AddFormItem(inputField)
 
 	form.SetBorder(true).SetTitle("Configuration Input").SetTitleAlign(tview.AlignLeft)
 
@@ -526,7 +523,7 @@ func (c *ConsoleApp) onConfigFileChanged() {
 func (c *ConsoleApp) dumpStepsToLog() {
 	const dumpDir = "out"
 
-	// Ensure directory exists
+	// Ensure output directory exists
 	err := os.MkdirAll(dumpDir, 0755)
 	if err != nil {
 		c.appendLog(fmt.Sprintf("[red]Failed to create output directory: %v", err))
@@ -540,56 +537,61 @@ func (c *ConsoleApp) dumpStepsToLog() {
 		return
 	}
 	for _, file := range files {
-		os.Remove(filepath.Join(dumpDir, file.Name()))
+		_ = os.Remove(filepath.Join(dumpDir, file.Name()))
 	}
 
-	// Dump steps
+	// Lock profiler data
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
+	// Helper to sanitize filenames
 	sanitizeFilename := func(name string) string {
 		name = strings.ReplaceAll(name, " ", "_")
 		invalidChars := regexp.MustCompile(`[\\/:*?"<>|]`)
-		name = invalidChars.ReplaceAllString(name, "")
-		return name
+		return invalidChars.ReplaceAllString(name, "")
 	}
 
-	depth := 0
+	// Recursive traversal of tree
+	var index int
+	var traverse func(node *tview.TreeNode, depth int)
 
-	for i, step := range c.profilerData {
-		// Apply prefix
-		prefix := strings.Repeat("__", depth)
-		prefixedName := prefix + step.Name
+	traverse = func(node *tview.TreeNode, depth int) {
+		// Only process nodes with data references
+		if ref := node.GetReference(); ref != nil {
+			if step, ok := ref.(apigorowler.StepProfilerData); ok {
+				// Apply indentation
+				prefix := strings.Repeat("__", depth)
+				prefixedName := prefix + step.Name
 
-		// Marshal step data
-		b, err := json.MarshalIndent(step, "", "  ")
-		if err != nil {
-			c.appendLog(fmt.Sprintf("[red]Failed to marshal step %d: %v", i, err))
-			continue
-		}
-
-		// Sanitize name and write
-		escapedStepName := sanitizeFilename(prefixedName)
-		filename := filepath.Join(dumpDir, fmt.Sprintf("%d_%s.json", i, escapedStepName))
-		err = os.WriteFile(filename, b, 0644)
-		if err != nil {
-			c.appendLog(fmt.Sprintf("[red]Failed to write step %d: %v", i, err))
-			continue
-		}
-
-		// Adjust depth AFTER writing (based on type)
-		switch step.Type {
-		case apigorowler.STEP_PROFILER_TYPE_START:
-			depth++
-		case apigorowler.STEP_PROFILER_TYPE_END:
-			if depth > 0 {
-				depth--
+				// Marshal step
+				b, err := json.MarshalIndent(step, "", "  ")
+				if err != nil {
+					c.appendLog(fmt.Sprintf("[red]Failed to marshal step %d: %v", index, err))
+				} else {
+					escapedName := sanitizeFilename(prefixedName)
+					filename := filepath.Join(dumpDir, fmt.Sprintf("%03d_%s.json", index, escapedName))
+					err = os.WriteFile(filename, b, 0644)
+					if err != nil {
+						c.appendLog(fmt.Sprintf("[red]Failed to write step %d: %v", index, err))
+					}
+				}
+				index++
 			}
 		}
+
+		// Traverse children
+		for _, child := range node.GetChildren() {
+			traverse(child, depth+1)
+		}
 	}
 
+	// Start traversal from root
+	root := c.steps.GetRoot()
+	traverse(root, 0)
+
+	// Log result
 	go func() {
-		c.appendLog(fmt.Sprintf("[green]Dumped %d steps to %s", len(c.profilerData), dumpDir))
+		c.appendLog(fmt.Sprintf("[green]Dumped %d steps to folder '%s'", index, dumpDir))
 	}()
 }
 
