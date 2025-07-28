@@ -285,7 +285,7 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 		}
 	}
 
-	c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Result", nil, nil, c.GetData())
+	c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Result", nil, c.GetData(), c.Config.RootContext)
 	return nil
 }
 
@@ -446,6 +446,23 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			}
 
 			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Transformation", exec, transformed, raw, "url", urlObj.String())
+			// ------------
+			// Nested foreach must happen on the "temporary" transform result, not the actual context because the results
+			// accumulated over calls and the foreach would end iterating the whole result each time
+
+			// create a new child context overriding current key
+			childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.currentContextKey, transformed)
+
+			for _, step := range exec.step.Steps {
+				newExec := newStepExecution(step, exec.currentContextKey, childContextMap)
+				// newExec := newStepExecution(step, exec.currentContextKey, c.ContextMap)
+				if err := c.ExecuteStep(ctx, newExec); err != nil {
+					return err
+				}
+			}
+
+			// use the nested result as transformed to perform merging
+			transformed = childContextMap[exec.currentContextKey].Data
 
 			// 1. Explicit merge rule (advanced use)
 			if exec.step.MergeOn != "" {
@@ -456,7 +473,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				if err != nil {
 					return fmt.Errorf("mergeOn failed: %w", err)
 				}
-				c.pushProfilerData(STEP_PROFILER_TYPE_END, "Response Merge-On", exec, updated, exec.currentContext.Data, "url", urlObj.String())
+				c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Merge-On", exec, updated, exec.currentContext.Data, "url", urlObj.String())
 				exec.currentContext.Data = updated
 			} else if exec.step.MergeWithParentOn != "" {
 				c.logger.Debug("[Request] merging-with-parent with expression: %s", exec.step.MergeWithParentOn)
@@ -467,7 +484,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				if err != nil {
 					return fmt.Errorf("mergeWithParentOn failed: %w", err)
 				}
-				c.pushProfilerData(STEP_PROFILER_TYPE_END, "Response Merge-Parent", exec, updated, parentCtx.Data, "url", urlObj.String())
+				c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Merge-Parent", exec, updated, parentCtx.Data, "url", urlObj.String())
 				parentCtx.Data = updated
 			} else if exec.step.MergeWithContext != nil {
 				c.logger.Debug("[Request] merging-with-context with expression: %s:%s",
@@ -482,7 +499,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				if err != nil {
 					return fmt.Errorf("mergeWithContext failed: %w", err)
 				}
-				c.pushProfilerData(STEP_PROFILER_TYPE_END, "Response Merge-Context", exec, updated, targetCtx.Data, "url", urlObj.String())
+				c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Merge-Context", exec, updated, targetCtx.Data, "url", urlObj.String())
 				targetCtx.Data = updated
 			} else {
 				c.logger.Debug("[Request] default merge")
@@ -501,19 +518,6 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 					exec.currentContext.Data = transformed
 				}
 			}
-
-			// trick to properly set nested foreach depth.
-			// Foreach uses the same context when extracting and building nested context, therefore we increment depth manually
-			exec.currentContext.depth += 1
-			for _, step := range exec.step.Steps {
-				newExec := newStepExecution(step, exec.currentContextKey, exec.contextMap)
-				// newExec := newStepExecution(step, exec.currentContextKey, c.ContextMap)
-				if err := c.ExecuteStep(ctx, newExec); err != nil {
-					return err
-				}
-			}
-			// restore original depth
-			exec.currentContext.depth -= 1
 
 			c.pushProfilerData(STEP_PROFILER_TYPE_END_SILENT, "", nil, nil, nil)
 

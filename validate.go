@@ -287,7 +287,7 @@ func validatePaginationStop(stop StopCondition, location string) []ValidationErr
 	if t == "pagenum" {
 		// For pageNum type, value is required
 		_, ok := stop.Value.(int)
-		if stop.Value == nil || ok {
+		if stop.Value == nil || !ok {
 			errs = append(errs, ValidationError{"pagination stop value is required and mut be an int when type is pageNum", location + ".value"})
 		}
 		// No other fields required

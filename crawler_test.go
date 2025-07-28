@@ -20,7 +20,7 @@ func TestExampleForeachValue(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=2": "testdata/crawler/example_foreach_value/facilities_2.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_foreach_value.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_foreach_value.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -42,7 +42,7 @@ func TestExampleForeachValueStream(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=2": "testdata/crawler/example_foreach_value/facilities_2.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_foreach_value_stream.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_foreach_value_stream.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -72,7 +72,7 @@ func TestExampleSingle(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=2": "testdata/crawler/example_single/facility_id_2.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_single.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_single.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -99,7 +99,7 @@ func TestExample2(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/Locations/l3":                     "testdata/crawler/example2/location_id_l3.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example2.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example2.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -121,7 +121,7 @@ func TestPaginatedIncrement(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/GetFacilities?offset=1": "testdata/crawler/paginated_increment/facilities_2.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_pagination_increment.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_pagination_increment.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -147,7 +147,7 @@ func TestPaginatedIncrementNested(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=4": "testdata/crawler/paginated_increment_stream/facility_id_4.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_pagination_increment_nested.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_pagination_increment_nested.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -173,7 +173,7 @@ func TestPaginatedIncrementStream(t *testing.T) {
 		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=4": "testdata/crawler/paginated_increment_stream/facility_id_4.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_pagination_increment_stream.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_pagination_increment_stream.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
@@ -203,7 +203,7 @@ func TestPaginatedNextUrl(t *testing.T) {
 		"http://list.com/page2":                            "testdata/crawler/next_url/facilities_2.json",
 	})
 
-	craw, _, _ := NewApiCrawler("testing/example_pagination_next.yaml")
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_pagination_next.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 

@@ -1,0 +1,41 @@
+# this configuration gets all breeds and then retrieves foreach of them details, merging in dogDetails and sreaming the results.
+# the configuration uses int pagination with hardcoded stop
+
+rootContext: []
+stream: true
+
+steps:
+    - type: request
+      name: first-request
+      request:
+          url: https://dogapi.dog/api/v2/breeds
+          method: GET
+          pagination:
+              params:
+                  - type: int
+                    name: page[number]
+                    location: query
+                    default: 1
+                    increment: "+ 1"
+              stopOn:
+                  - type: requestParam
+                    param: ".query.page[number]"
+                    compare: eq
+                    value: 3
+ 
+      resultTransformer: .data
+ 
+      steps:
+          - type: forEach
+            name: get details
+            path: .
+            as: dog
+ 
+            steps:
+                - type: request
+                  name: details-request
+                  request:
+                      url: https://dogapi.dog/api/v2/breeds/{{ .dog.id }}
+                      method: GET
+                  resultTransformer: .data
+                  mergeOn: .dogDetails = $res

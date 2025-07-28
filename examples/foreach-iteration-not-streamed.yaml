@@ -1,0 +1,22 @@
+### This file iterates over a list of hardcoded id, gets details and merges results in the the resulting array
+
+rootContext: []
+stream: false
+
+steps:
+    - type: forEach
+      name: value-iterator
+      values:
+        - 036feed0-da8a-42c9-ab9a-57449b530b13
+        - dd9362cc-52e0-462d-b856-fccdcf24b140
+      path: .
+      as: ids
+      steps:
+        - type: request
+          name: details-request
+          request:
+              url: https://dogapi.dog/api/v2/breeds/{{ .ids.value }}
+              method: GET
+          resultTransformer: .data
+          mergeOn: . = $res
+ 

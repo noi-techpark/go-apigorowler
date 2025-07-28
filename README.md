@@ -164,7 +164,7 @@ rootContext: []
 | `name`              | string               | Optional name for the step                           |
 | `path`              | jq expression        | **Required.** Path to the array to iterate over      |
 | `as`                | string               | **Required.** Variable name for each item in context |
-| `values`            | array<any>           | Optional. Static values to iterate over              |
+| `values`            | array<any>           | Optional. Static values to iterate over, when using values in the url you need to access the current iteration value using `.[ctx-name].value` (example)[./examples/foreach-iteration.yaml]             |
 | `steps`             | Array<ForeachStep\|RequestStep> | Optional. Nested steps |
 | `mergeWithParentOn` | jq expression        | Optional. Rule for merging with parent context       |
 | `mergeOn`           | jq expression        | Optional. Rule for merging with ancestor context     |
@@ -260,15 +260,54 @@ The CLI utility enables real-time execution of your manifest with step-by-step i
 
 ---
 
-## Summary
+Of course! Here's the completed section.
 
-ApiGorowler is a versatile tool for API data extraction, offering control over structure, transformation, and authentication. Its YAML-driven configuration and real-time testing make it a powerful choice for building custom data pipelines.
+## Examples
 
-For best practices:
+The package includes several tests and examples to better understand its usage. The configuration files listed below demonstrate various features.
 
-* Modularize `steps` using nested `forEach`
-* Keep `auth` and `headers` global unless overrides are needed
-* Use `mergeWithParentOn` and `mergeOn` thoughtfully to preserve context integrity
+Feel free to contribute by adding more examples or tests\! 🚀
+
+-----
+
+### Test Cases
+
+These files are used for automated testing of the **paginator** and **crawler** components.
+
+| Test                                                                                     | Short Description                                                        |
+| :--------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- |
+| [`test1_int_increment.yaml`](https://www.google.com/search?q=./testdata/paginator/test1_int_increment.yaml)                | Tests pagination using a simple integer increment.                       |
+| [`test2_datetime.yaml`](https://www.google.com/search?q=./testdata/paginator/test2_datetime.yaml)                          | Tests pagination based on datetime values.                               |
+| [`test3_next_token.yaml`](https://www.google.com/search?q=./testdata/paginator/test3_next_token.yaml)                      | Tests pagination using a next token from the response.                   |
+| [`test4_empty.yaml`](https://www.google.com/search?q=./testdata/paginator/test4_empty.yaml)                                | Checks handling of an empty response.                                    |
+| [`test5_empty_array.yaml`](https://www.google.com/search?q=./testdata/paginator/test5_empty_array.yaml)                    | Checks handling of a response with an empty array.                       |
+| [`test6_now_datetime.yaml`](https://www.google.com/search?q=./testdata/paginator/test6_now_datetime.yaml)                  | Tests pagination using the current datetime.                             |
+| [`test7_now_datetime_multistop.yaml`](https://www.google.com/search?q=./testdata/paginator/test7_now_datetime_multistop.yaml)| Tests pagination with multiple stop conditions based on datetime.        |
+| [`test8_example_pagination_url.yaml`](https://www.google.com/search?q=./testdata/paginator/test8_example_pagination_url.yaml)| Tests pagination using a full next URL.                                  |
+| [`test9_stop_on_iteration.yaml`](https://www.google.com/search?q=./testdata/paginator/test9_stop_on_iteration.yaml)        | Tests the stop condition based on the iteration count.                   |
+| [`example.yaml`](https://www.google.com/search?q=./testdata/crawler/example.yaml)                                          | A general, baseline crawler configuration.                               |
+| [`example2.yaml`](https://www.google.com/search?q=./testdata/crawler/example2.yaml)                                        | A more complex crawler example with nested requests.                     |
+| [`example_single.yaml`](https://www.google.com/search?q=./testdata/crawler/example_single.yaml)                            | Defines a single, non-paginated API request.                             |
+| [`example_foreach_value.yaml`](https://www.google.com/search?q=./testdata/crawler/example_foreach_value.yaml)              | Demonstrates `foreach` iteration over response values.                   |
+| [`example_foreach_value_stream.yaml`](https://www.google.com/search?q=./testdata/crawler/example_foreach_value_stream.yaml)| Demonstrates `foreach` iteration with streaming enabled.                 |
+| [`example_pagination_next.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_next.yaml)          | Tests pagination using a `next_url` path from the response.              |
+| [`example_pagination_increment.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_increment.yaml)| Tests simple pagination based on an incrementing number.                 |
+| [`example_pagination_increment_stream.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_increment_stream.yaml)| Tests simple pagination with streaming enabled.                          |
+| [`example_pagination_increment_nested.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_increment_nested.yaml)| Tests pagination on a nested API request.                                |
+
+-----
+
+### Usage Examples
+
+These files provide practical, ready-to-use examples for common crawling patterns.
+
+| Example                                                                                              | Short Description                                                        |
+| :--------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- |
+| [`foreach-iteration-not-streamed.yaml`](https://www.google.com/search?q=./examples/foreach-iteration-not-streamed.yaml)                | Example of iterating over a list without streaming the final output.     |
+| [`list-and-details-paginated-stopped-streamed.yaml`](https://www.google.com/search?q=./examples/list-and-details-paginated-stopped-streamed.yaml)| A complex example combining pagination, stop conditions, and streaming.  |
+| [`pagination-url-not-stream.yaml`](https://www.google.com/search?q=./examples/pagination-url-not-stream.yaml)                          | Example of pagination using a next URL without streaming.                |
+
+-----
 
 ## Debug & development
 (cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2)
