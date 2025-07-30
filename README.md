@@ -139,10 +139,10 @@ rootContext: []
 | Field         | Type                   | Description                                                    |
 | ------------- | ---------------------- | -------------------------------------------------------------- |
 | `rootContext` | `[]` or `{}`           | **Required.** Initial context for the crawler.                 |
-| `auth`        | `AuthenticationStruct` | Optional. Global authentication configuration.                 |
+| `auth`        | [AuthenticationStruct](#authenticationstruct) | Optional. Global authentication configuration.                 |
 | `headers`     | `map[string]string`    | Optional. Global headers.                                      |
 | `stream`      | `boolean`              | Optional. Enable streaming; requires `rootContext` to be `[]`. |
-| `steps`       | `Array<ForeachStep\|RequestStep>` | **Required.** List of crawler steps. |
+| `steps`       | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | **Required.** List of crawler steps. |
 
 ---
 
@@ -170,10 +170,10 @@ rootContext: []
 | `path`              | jq expression        | **Required.** Path to the array to iterate over      |
 | `as`                | string               | **Required.** Variable name for each item in context |
 | `values`            | array<any>           | Optional. Static values to iterate over, when using values in the url you need to access the current iteration value using `.[ctx-name].value` (example)[./examples/foreach-iteration.yaml]             |
-| `steps`             | Array<ForeachStep\|RequestStep> | Optional. Nested steps |
+| `steps`             | [ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
 | `mergeWithParentOn` | jq expression        | Optional. Rule for merging with parent context       |
 | `mergeOn`           | jq expression        | Optional. Rule for merging with ancestor context     |
-| `mergeWithContext`  | MergeWithContextRule | Optional. Advanced merging rule                      |
+| `mergeWithContext`  | [MergeWithContextRule](#mergewithcontextrule) | Optional. Advanced merging rule                      |
 
 ---
 
@@ -192,7 +192,7 @@ rootContext: []
 | ------------------- | ------------- | ------------------------------------- |
 | `type`              | string        | **Required.** Must be `request`       |
 | `name`              | string        | Optional step name                    |
-| `request`           | RequestStruct | **Required.** Request configuration   |
+| `request`           | [RequestStruct](#requeststruct) | **Required.** Request configuration   |
 | `resultTransformer` | jq expression | Optional transformation of the result |
 
 ---
@@ -202,7 +202,7 @@ rootContext: []
 | Field        | Type                 | Description                      |                           |
 | ------------ | -------------------- | -------------------------------- | ------------------------- |
 | `url`        | go-template string   | **Required.** Request URL        |                           |
-| `method`     | string (`GET`        | `POST`)                          | **Required.** HTTP method |
+| `method`     | string (`GET`        \| `POST`)                          | **Required.** HTTP method |
 | `headers`    | map\<string, string> | Optional headers                 |                           |
 | `body`       | yaml struct          | Optional request body            |                           |
 | `pagination` | PaginationStruct     | Optional pagination config       |                           |
@@ -281,24 +281,24 @@ These files are used for automated testing of the **paginator** and **crawler** 
 
 | Test                                                                                     | Short Description                                                        |
 | :--------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- |
-| [`test1_int_increment.yaml`](https://www.google.com/search?q=./testdata/paginator/test1_int_increment.yaml)                | Tests pagination using a simple integer increment.                       |
-| [`test2_datetime.yaml`](https://www.google.com/search?q=./testdata/paginator/test2_datetime.yaml)                          | Tests pagination based on datetime values.                               |
-| [`test3_next_token.yaml`](https://www.google.com/search?q=./testdata/paginator/test3_next_token.yaml)                      | Tests pagination using a next token from the response.                   |
-| [`test4_empty.yaml`](https://www.google.com/search?q=./testdata/paginator/test4_empty.yaml)                                | Checks handling of an empty response.                                    |
-| [`test5_empty_array.yaml`](https://www.google.com/search?q=./testdata/paginator/test5_empty_array.yaml)                    | Checks handling of a response with an empty array.                       |
-| [`test6_now_datetime.yaml`](https://www.google.com/search?q=./testdata/paginator/test6_now_datetime.yaml)                  | Tests pagination using the current datetime.                             |
-| [`test7_now_datetime_multistop.yaml`](https://www.google.com/search?q=./testdata/paginator/test7_now_datetime_multistop.yaml)| Tests pagination with multiple stop conditions based on datetime.        |
-| [`test8_example_pagination_url.yaml`](https://www.google.com/search?q=./testdata/paginator/test8_example_pagination_url.yaml)| Tests pagination using a full next URL.                                  |
-| [`test9_stop_on_iteration.yaml`](https://www.google.com/search?q=./testdata/paginator/test9_stop_on_iteration.yaml)        | Tests the stop condition based on the iteration count.                   |
-| [`example.yaml`](https://www.google.com/search?q=./testdata/crawler/example.yaml)                                          | A general, baseline crawler configuration.                               |
-| [`example2.yaml`](https://www.google.com/search?q=./testdata/crawler/example2.yaml)                                        | A more complex crawler example with nested requests.                     |
-| [`example_single.yaml`](https://www.google.com/search?q=./testdata/crawler/example_single.yaml)                            | Defines a single, non-paginated API request.                             |
-| [`example_foreach_value.yaml`](https://www.google.com/search?q=./testdata/crawler/example_foreach_value.yaml)              | Demonstrates `foreach` iteration over response values.                   |
-| [`example_foreach_value_stream.yaml`](https://www.google.com/search?q=./testdata/crawler/example_foreach_value_stream.yaml)| Demonstrates `foreach` iteration with streaming enabled.                 |
-| [`example_pagination_next.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_next.yaml)          | Tests pagination using a `next_url` path from the response.              |
-| [`example_pagination_increment.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_increment.yaml)| Tests simple pagination based on an incrementing number.                 |
-| [`example_pagination_increment_stream.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_increment_stream.yaml)| Tests simple pagination with streaming enabled.                          |
-| [`example_pagination_increment_nested.yaml`](https://www.google.com/search?q=./testdata/crawler/example_pagination_increment_nested.yaml)| Tests pagination on a nested API request.                                |
+| [`test1_int_increment.yaml`](testdata/paginator/test1_int_increment.yaml)                | Tests pagination using a simple integer increment.                       |
+| [`test2_datetime.yaml`](testdata/paginator/test2_datetime.yaml)                          | Tests pagination based on datetime values.                               |
+| [`test3_next_token.yaml`](testdata/paginator/test3_next_token.yaml)                      | Tests pagination using a next token from the response.                   |
+| [`test4_empty.yaml`](testdata/paginator/test4_empty.yaml)                                | Checks handling of an empty response.                                    |
+| [`test5_empty_array.yaml`](testdata/paginator/test5_empty_array.yaml)                    | Checks handling of a response with an empty array.                       |
+| [`test6_now_datetime.yaml`](testdata/paginator/test6_now_datetime.yaml)                  | Tests pagination using the current datetime.                             |
+| [`test7_now_datetime_multistop.yaml`](testdata/paginator/test7_now_datetime_multistop.yaml)| Tests pagination with multiple stop conditions based on datetime.        |
+| [`test8_example_pagination_url.yaml`](testdata/paginator/test8_example_pagination_url.yaml)| Tests pagination using a full next URL.                                  |
+| [`test9_stop_on_iteration.yaml`](testdata/paginator/test9_stop_on_iteration.yaml)        | Tests the stop condition based on the iteration count.                   |
+| [`example.yaml`](testdata/crawler/example.yaml)                                          | A general, baseline crawler configuration.                               |
+| [`example2.yaml`](testdata/crawler/example2.yaml)                                        | A more complex crawler example with nested requests.                     |
+| [`example_single.yaml`](testdata/crawler/example_single.yaml)                            | Defines a single, non-paginated API request.                             |
+| [`example_foreach_value.yaml`](testdata/crawler/example_foreach_value.yaml)              | Demonstrates `foreach` iteration over response values.                   |
+| [`example_foreach_value_stream.yaml`](testdata/crawler/example_foreach_value_stream.yaml)| Demonstrates `foreach` iteration with streaming enabled.                 |
+| [`example_pagination_next.yaml`](testdata/crawler/example_pagination_next.yaml)          | Tests pagination using a `next_url` path from the response.              |
+| [`example_pagination_increment.yaml`](testdata/crawler/example_pagination_increment.yaml)| Tests simple pagination based on an incrementing number.                 |
+| [`example_pagination_increment_stream.yaml`](testdata/crawler/example_pagination_increment_stream.yaml)| Tests simple pagination with streaming enabled.                          |
+| [`example_pagination_increment_nested.yaml`](testdata/crawler/example_pagination_increment_nested.yaml)| Tests pagination on a nested API request.                                |
 
 -----
 
@@ -308,9 +308,9 @@ These files provide practical, ready-to-use examples for common crawling pattern
 
 | Example                                                                                              | Short Description                                                        |
 | :--------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------- |
-| [`foreach-iteration-not-streamed.yaml`](https://www.google.com/search?q=./examples/foreach-iteration-not-streamed.yaml)                | Example of iterating over a list without streaming the final output.     |
-| [`list-and-details-paginated-stopped-streamed.yaml`](https://www.google.com/search?q=./examples/list-and-details-paginated-stopped-streamed.yaml)| A complex example combining pagination, stop conditions, and streaming.  |
-| [`pagination-url-not-stream.yaml`](https://www.google.com/search?q=./examples/pagination-url-not-stream.yaml)                          | Example of pagination using a next URL without streaming.                |
+| [`foreach-iteration-not-streamed.yaml`](examples/foreach-iteration-not-streamed.yaml)                | Example of iterating over a list without streaming the final output.     |
+| [`list-and-details-paginated-stopped-streamed.yaml`](examples/list-and-details-paginated-stopped-streamed.yaml)| A complex example combining pagination, stop conditions, and streaming.  |
+| [`pagination-url-not-stream.yaml`](examples/pagination-url-not-stream.yaml)                          | Example of pagination using a next URL without streaming.                |
 
 -----
 
