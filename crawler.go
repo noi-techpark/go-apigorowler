@@ -139,6 +139,8 @@ type ApiCrawler struct {
 	httpClient          HTTPClient
 	profiler            chan StepProfilerData
 	enableProfilation   bool
+	templateCache       map[string]*template.Template
+	jqCache             map[string]*gojq.Code
 }
 
 func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
@@ -159,11 +161,13 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 	}
 
 	c := &ApiCrawler{
-		httpClient: http.DefaultClient,
-		Config:     cfg,
-		ContextMap: map[string]*Context{},
-		logger:     NewDefaultLogger(),
-		profiler:   nil,
+		httpClient:    http.DefaultClient,
+		Config:        cfg,
+		ContextMap:    map[string]*Context{},
+		logger:        NewDefaultLogger(),
+		profiler:      nil,
+		templateCache: make(map[string]*template.Template),
+		jqCache:       make(map[string]*gojq.Code),
 	}
 
 	// handle stream channel
@@ -200,6 +204,50 @@ func (a *ApiCrawler) EnableProfiler() chan StepProfilerData {
 	a.enableProfilation = true
 	a.profiler = make(chan StepProfilerData)
 	return a.profiler
+}
+
+// getOrCompileTemplate retrieves a pre-compiled template from the cache,
+// or compiles, caches, and returns it if not found.
+func (a *ApiCrawler) getOrCompileTemplate(tmplString string) (*template.Template, error) {
+	if tmpl, ok := a.templateCache[tmplString]; ok {
+		return tmpl, nil
+	}
+
+	tmpl, err := template.New("dynamic").Parse(tmplString)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing template: %w", err)
+	}
+
+	a.templateCache[tmplString] = tmpl
+	return tmpl, nil
+}
+
+// getOrCompileJQRule retrieves a pre-compiled JQ rule from the cache,
+// or compiles, caches, and returns it if not found.
+func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) (*gojq.Code, error) {
+	cacheKey := ruleString
+	if len(variables) > 0 {
+		// Use a unique key for rules with variables
+		// to avoid collisions with rules without variables.
+		cacheKey += fmt.Sprintf("$$vars:%v", variables)
+	}
+
+	if code, ok := a.jqCache[cacheKey]; ok {
+		return code, nil
+	}
+
+	query, err := gojq.Parse(ruleString)
+	if err != nil {
+		return nil, fmt.Errorf("invalid jq rule '%s': %w", ruleString, err)
+	}
+
+	code, err := gojq.Compile(query, gojq.WithVariables(variables))
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile jq rule: %w", err)
+	}
+
+	a.jqCache[cacheKey] = code
+	return code, nil
 }
 
 func deepCopy[T any](src T) (T, error) {
@@ -304,10 +352,11 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	c.logger.Info("[Request] Preparing %s", exec.step.Name)
 
 	// 1. Expand URL using Go template
-	tmpl, err := template.New("url").Parse(exec.step.Request.URL)
+	tmpl, err := c.getOrCompileTemplate(exec.step.Request.URL)
 	if err != nil {
-		return fmt.Errorf("error parsing URL template: %w", err)
+		return fmt.Errorf("error getting/compiling URL template: %w", err)
 	}
+
 	var urlBuf bytes.Buffer
 	templateCtx := contextMapToTemplate(exec.contextMap)
 	if err := tmpl.Execute(&urlBuf, templateCtx); err != nil {
@@ -418,11 +467,13 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			if exec.step.ResultTransformer != "" {
 				c.logger.Debug("[Request] transforming with expression: %s", exec.step.ResultTransformer)
 
-				query, err := gojq.Parse(exec.step.ResultTransformer)
+				// Create the evaluation context with $res variable bound
+				code, err := c.getOrCompileJQRule(exec.step.ResultTransformer, "$ctx")
 				if err != nil {
-					return fmt.Errorf("invalid resultTransformer JQ: %w", err)
+					return fmt.Errorf("failed to get/compile transform rule: %w", err)
 				}
-				iter := query.Run(raw)
+
+				iter := code.Run(raw, templateCtx)
 				var singleResult interface{}
 				count := 0
 
@@ -469,7 +520,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				c.logger.Debug("[Request] merging-on with expression: %s", exec.step.MergeOn)
 
 				// Simple jq merge on current context
-				updated, err := applyMergeRule(exec.currentContext.Data, exec.step.MergeOn, transformed)
+				updated, err := applyMergeRule(c, exec.currentContext.Data, exec.step.MergeOn, transformed)
 				if err != nil {
 					return fmt.Errorf("mergeOn failed: %w", err)
 				}
@@ -480,7 +531,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 				parentCtx := exec.contextMap[exec.currentContext.ParentContext]
 				// Simple jq merge on current context
-				updated, err := applyMergeRule(parentCtx.Data, exec.step.MergeWithParentOn, transformed)
+				updated, err := applyMergeRule(c, parentCtx.Data, exec.step.MergeWithParentOn, transformed)
 				if err != nil {
 					return fmt.Errorf("mergeWithParentOn failed: %w", err)
 				}
@@ -495,7 +546,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				if !ok {
 					return fmt.Errorf("context '%s' not found", exec.step.MergeWithContext.Name)
 				}
-				updated, err := applyMergeRule(targetCtx.Data, exec.step.MergeWithContext.Rule, transformed)
+				updated, err := applyMergeRule(c, targetCtx.Data, exec.step.MergeWithContext.Rule, transformed)
 				if err != nil {
 					return fmt.Errorf("mergeWithContext failed: %w", err)
 				}
@@ -548,12 +599,12 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	if len(exec.step.Path) != 0 && exec.step.Values == nil {
 		c.logger.Debug("[Foreach] Extracting from parent context with rule: %s", exec.step.Path)
 
-		query, err := gojq.Parse(exec.step.Path)
+		code, err := c.getOrCompileJQRule(exec.step.Path)
 		if err != nil {
-			return fmt.Errorf("invalid jq path '%s': %w", exec.step.Path, err)
+			return fmt.Errorf("failed to get/compile jq path: %w", err)
 		}
 
-		iter := query.Run(exec.currentContext.Data)
+		iter := code.Run(exec.currentContext.Data)
 		for {
 			v, ok := iter.Next()
 			if !ok {
@@ -609,13 +660,9 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 	// We need to path the context with the result of the nested data.
 	// This has to be done only if we are using path selector, foreach with hadcoded values already merge with some othe context
-	query, err := gojq.Parse(exec.step.Path + " = $new")
+	code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
 	if err != nil {
-		return fmt.Errorf("invalid merge rule JQ: %w", err)
-	}
-	code, err := gojq.Compile(query, gojq.WithVariables([]string{"$new"}))
-	if err != nil {
-		return fmt.Errorf("failed to compile merge rule: %w", err)
+		return fmt.Errorf("failed to get/compile merge rule: %w", err)
 	}
 
 	// Run the query against contextData, passing $new as a variable
@@ -652,17 +699,11 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	return nil
 }
 
-func applyMergeRule(contextData interface{}, rule string, result interface{}) (interface{}, error) {
+func applyMergeRule(c *ApiCrawler, contextData interface{}, rule string, result interface{}) (interface{}, error) {
 	// Parse the JQ expression
-	query, err := gojq.Parse(rule)
+	code, err := c.getOrCompileJQRule(rule, "$res")
 	if err != nil {
-		return nil, fmt.Errorf("invalid merge rule JQ: %w", err)
-	}
-
-	// Create the evaluation context with $res variable bound
-	code, err := gojq.Compile(query, gojq.WithVariables([]string{"$res"}))
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile merge rule: %w", err)
+		return nil, fmt.Errorf("failed to get/compile merge rule: %w", err)
 	}
 
 	// Run the query against contextData, passing $res as a variable

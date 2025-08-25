@@ -294,6 +294,7 @@ These files are used for automated testing of the **paginator** and **crawler** 
 | [`example2.yaml`](testdata/crawler/example2.yaml)                                        | A more complex crawler example with nested requests.                     |
 | [`example_single.yaml`](testdata/crawler/example_single.yaml)                            | Defines a single, non-paginated API request.                             |
 | [`example_foreach_value.yaml`](testdata/crawler/example_foreach_value.yaml)              | Demonstrates `foreach` iteration over response values.                   |
+| [`example_foreach_value_transform_ctx.yaml`](testdata/crawler/example_foreach_value_transform_ctx.yaml)              | Demonstrates `foreach` iteration over response values using the value itself in transformation                   |
 | [`example_foreach_value_stream.yaml`](testdata/crawler/example_foreach_value_stream.yaml)| Demonstrates `foreach` iteration with streaming enabled.                 |
 | [`example_pagination_next.yaml`](testdata/crawler/example_pagination_next.yaml)          | Tests pagination using a `next_url` path from the response.              |
 | [`example_pagination_increment.yaml`](testdata/crawler/example_pagination_increment.yaml)| Tests simple pagination based on an incrementing number.                 |

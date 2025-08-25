@@ -36,6 +36,28 @@ func TestExampleForeachValue(t *testing.T) {
 	assert.Equal(t, expected, data)
 }
 
+func TestExampleForeachValueCtx(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=1": "testdata/crawler/example_foreach_value_transform_ctx/facilities_1.json",
+		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=2": "testdata/crawler/example_foreach_value_transform_ctx/facilities_2.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/example_foreach_value_transform_ctx.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/example_foreach_value_transform_ctx/output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
 func TestExampleForeachValueStream(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
 		"https://www.onecenter.info/api/DAZ/FacilityFreePlaces?FacilityID=1": "testdata/crawler/example_foreach_value/facilities_1.json",
