@@ -2,6 +2,8 @@ module github.com/noi-techpark/go-apigorowler/ide
 
 go 1.24.4
 
+replace github.com/noi-techpark/go-apigorowler => ../..
+
 require (
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gdamore/tcell/v2 v2.8.1

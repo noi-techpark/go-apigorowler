@@ -497,15 +497,20 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			}
 
 			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, "Response Transformation", exec, transformed, raw, "url", urlObj.String())
+
+			thisContextKey := exec.currentContextKey
+			if exec.step.As != "" {
+				thisContextKey = exec.step.As
+			}
 			// ------------
 			// Nested foreach must happen on the "temporary" transform result, not the actual context because the results
 			// accumulated over calls and the foreach would end iterating the whole result each time
 
 			// create a new child context overriding current key
-			childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.currentContextKey, transformed)
+			childContextMap := childMapWith(exec.contextMap, exec.currentContext, thisContextKey, transformed)
 
 			for _, step := range exec.step.Steps {
-				newExec := newStepExecution(step, exec.currentContextKey, childContextMap)
+				newExec := newStepExecution(step, thisContextKey, childContextMap)
 				// newExec := newStepExecution(step, exec.currentContextKey, c.ContextMap)
 				if err := c.ExecuteStep(ctx, newExec); err != nil {
 					return err
@@ -513,14 +518,15 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			}
 
 			// use the nested result as transformed to perform merging
-			transformed = childContextMap[exec.currentContextKey].Data
+			transformed = childContextMap[thisContextKey].Data
 
 			// 1. Explicit merge rule (advanced use)
 			if exec.step.MergeOn != "" {
 				c.logger.Debug("[Request] merging-on with expression: %s", exec.step.MergeOn)
+				templateCtx := contextMapToTemplate(exec.contextMap)
 
 				// Simple jq merge on current context
-				updated, err := applyMergeRule(c, exec.currentContext.Data, exec.step.MergeOn, transformed)
+				updated, err := applyMergeRule(c, exec.currentContext.Data, exec.step.MergeOn, transformed, templateCtx)
 				if err != nil {
 					return fmt.Errorf("mergeOn failed: %w", err)
 				}
@@ -528,10 +534,11 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				exec.currentContext.Data = updated
 			} else if exec.step.MergeWithParentOn != "" {
 				c.logger.Debug("[Request] merging-with-parent with expression: %s", exec.step.MergeWithParentOn)
+				templateCtx := contextMapToTemplate(exec.contextMap)
 
 				parentCtx := exec.contextMap[exec.currentContext.ParentContext]
 				// Simple jq merge on current context
-				updated, err := applyMergeRule(c, parentCtx.Data, exec.step.MergeWithParentOn, transformed)
+				updated, err := applyMergeRule(c, parentCtx.Data, exec.step.MergeWithParentOn, transformed, templateCtx)
 				if err != nil {
 					return fmt.Errorf("mergeWithParentOn failed: %w", err)
 				}
@@ -541,12 +548,13 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				c.logger.Debug("[Request] merging-with-context with expression: %s:%s",
 					exec.step.MergeWithContext.Name, exec.step.MergeWithContext.Rule)
 
+				templateCtx := contextMapToTemplate(exec.contextMap)
 				// 2. Named context merge (cross-scope update)
 				targetCtx, ok := exec.contextMap[exec.step.MergeWithContext.Name]
 				if !ok {
 					return fmt.Errorf("context '%s' not found", exec.step.MergeWithContext.Name)
 				}
-				updated, err := applyMergeRule(c, targetCtx.Data, exec.step.MergeWithContext.Rule, transformed)
+				updated, err := applyMergeRule(c, targetCtx.Data, exec.step.MergeWithContext.Rule, transformed, templateCtx)
 				if err != nil {
 					return fmt.Errorf("mergeWithContext failed: %w", err)
 				}
@@ -699,15 +707,15 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	return nil
 }
 
-func applyMergeRule(c *ApiCrawler, contextData interface{}, rule string, result interface{}) (interface{}, error) {
+func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, templateCtx map[string]any) (interface{}, error) {
 	// Parse the JQ expression
-	code, err := c.getOrCompileJQRule(rule, "$res")
+	code, err := c.getOrCompileJQRule(rule, "$res", "$ctx")
 	if err != nil {
 		return nil, fmt.Errorf("failed to get/compile merge rule: %w", err)
 	}
 
 	// Run the query against contextData, passing $res as a variable
-	iter := code.Run(contextData, result)
+	iter := code.Run(contextData, result, templateCtx)
 
 	// Collect the results, expecting exactly one
 	var values []interface{}
