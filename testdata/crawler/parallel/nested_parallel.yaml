@@ -1,0 +1,30 @@
+rootContext: []
+
+steps:
+  - type: forEach
+    path: .
+    as: category
+    parallel: true
+    maxConcurrency: 2
+    values: ["electronics", "books"]
+    steps:
+      - type: request
+        name: Get Category Items
+        request:
+          url: "https://api.example.com/categories/{{ .category.value }}/items"
+          method: GET
+        resultTransformer: .items
+        mergeOn: ". = $res"
+        steps:
+          - type: forEach
+            path: .
+            as: item
+            parallel: true
+            maxConcurrency: 3
+            steps:
+              - type: request
+                name: Get Item Details
+                request:
+                  url: "https://api.example.com/items/{{ .item.id }}"
+                  method: GET
+                mergeOn: ". = $res"

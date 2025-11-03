@@ -325,3 +325,113 @@ func TestParallelNoopMerge(t *testing.T) {
 	assert.True(t, ids[2], "Should contain item with id 2")
 	assert.True(t, ids[3], "Should contain item with id 3")
 }
+
+func TestParallelErrorHandling(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/items/1": "testdata/crawler/parallel/item_1.json",
+		"https://api.example.com/items/2": "testdata/crawler/parallel/invalid.json", // Invalid JSON will cause decode error
+		"https://api.example.com/items/3": "testdata/crawler/parallel/item_3.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/parallel/error_handling.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+
+	// Error should be propagated, not swallowed by goroutines
+	require.NotNil(t, err, "Should return error when JSON decoding fails")
+	assert.Contains(t, err.Error(), "decoding JSON", "Error should mention JSON decoding failure")
+}
+
+func TestParallelNestedParallelism(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/categories/electronics/items": "testdata/crawler/parallel/category_electronics.json",
+		"https://api.example.com/categories/books/items":       "testdata/crawler/parallel/category_books.json",
+		"https://api.example.com/items/1":                      "testdata/crawler/parallel/item_detail_1.json",
+		"https://api.example.com/items/2":                      "testdata/crawler/parallel/item_detail_2.json",
+		"https://api.example.com/items/3":                      "testdata/crawler/parallel/item_detail_3.json",
+		"https://api.example.com/items/4":                      "testdata/crawler/parallel/item_detail_4.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/parallel/nested_parallel.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	// Should have 2 categories (electronics and books)
+	resultArray, ok := data.([]interface{})
+	require.True(t, ok, "Result should be an array")
+	require.Len(t, resultArray, 2, "Should have 2 categories")
+
+	// Each category should have items with details
+	totalItems := 0
+	for _, category := range resultArray {
+		categoryArray, ok := category.([]interface{})
+		require.True(t, ok, "Each category should be an array")
+		totalItems += len(categoryArray)
+
+		// Verify items have been enriched with details (price field)
+		for _, item := range categoryArray {
+			itemMap := item.(map[string]interface{})
+			_, hasPrice := itemMap["price"]
+			assert.True(t, hasPrice, "Item should have price from detail request")
+		}
+	}
+
+	assert.Equal(t, 4, totalItems, "Should have 4 total items across both categories")
+}
+
+func TestParallelMultiRootParallel(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/users/1":    "testdata/crawler/parallel/user_1.json",
+		"https://api.example.com/users/2":    "testdata/crawler/parallel/user_2.json",
+		"https://api.example.com/products/101": "testdata/crawler/parallel/product_101.json",
+		"https://api.example.com/products/102": "testdata/crawler/parallel/product_102.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/parallel/multi_root_parallel.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	// Check result structure
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+
+	users, ok := resultMap["users"].([]interface{})
+	require.True(t, ok, "users should be an array")
+	require.Len(t, users, 2, "Should have 2 users")
+
+	products, ok := resultMap["products"].([]interface{})
+	require.True(t, ok, "products should be an array")
+	require.Len(t, products, 2, "Should have 2 products")
+
+	// Verify users have correct IDs
+	userIds := make(map[float64]bool)
+	for _, user := range users {
+		userMap := user.(map[string]interface{})
+		id := userMap["id"].(float64)
+		userIds[id] = true
+	}
+	assert.True(t, userIds[1], "Should have user with id 1")
+	assert.True(t, userIds[2], "Should have user with id 2")
+
+	// Verify products have correct IDs
+	productIds := make(map[float64]bool)
+	for _, product := range products {
+		productMap := product.(map[string]interface{})
+		id := productMap["id"].(float64)
+		productIds[id] = true
+	}
+	assert.True(t, productIds[101], "Should have product with id 101")
+	assert.True(t, productIds[102], "Should have product with id 102")
+}

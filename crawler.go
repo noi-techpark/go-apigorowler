@@ -84,6 +84,7 @@ const RES_KEY = "$res"
 
 type RateLimitConfig struct {
 	RequestsPerSecond float64 `yaml:"requestsPerSecond" json:"requestsPerSecond"`
+	Burst             int     `yaml:"burst,omitempty" json:"burst,omitempty"`
 }
 
 type Config struct {
@@ -544,7 +545,12 @@ func createRateLimiter(stepLimit, globalLimit *RateLimitConfig) *rate.Limiter {
 		return nil
 	}
 
-	return rate.NewLimiter(rate.Limit(limitConfig.RequestsPerSecond), 1)
+	burst := limitConfig.Burst
+	if burst <= 0 {
+		burst = 1 // Default burst size
+	}
+
+	return rate.NewLimiter(rate.Limit(limitConfig.RequestsPerSecond), burst)
 }
 
 // executeForEachIteration executes a single forEach iteration
