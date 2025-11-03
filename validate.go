@@ -172,6 +172,26 @@ func validateStep(step Step, location string) []ValidationError {
 		// could validate jq here with gojq.Parse(step.MergeWithParentOn)
 	}
 
+	// Validate noopMerge doesn't conflict with other merge options
+	if step.NoopMerge {
+		conflictCount := 0
+		if step.MergeOn != "" {
+			conflictCount++
+		}
+		if step.MergeWithParentOn != "" {
+			conflictCount++
+		}
+		if step.MergeWithContext != nil {
+			conflictCount++
+		}
+		if conflictCount > 0 {
+			errs = append(errs, ValidationError{
+				"noopMerge cannot be used with mergeOn, mergeWithParentOn, or mergeWithContext",
+				location + ".noopMerge",
+			})
+		}
+	}
+
 	return errs
 }
 
