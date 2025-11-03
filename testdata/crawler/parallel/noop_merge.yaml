@@ -1,0 +1,17 @@
+rootContext: {"items": []}
+
+steps:
+  - type: forEach
+    path: .
+    as: id
+    parallel: true
+    maxConcurrency: 3
+    noopMerge: true
+    values: [1, 2, 3]
+    steps:
+      - type: request
+        name: Get Item
+        request:
+          url: "https://api.example.com/items/{{ .id.value }}"
+          method: GET
+        mergeWithParentOn: ".items += [$res]"

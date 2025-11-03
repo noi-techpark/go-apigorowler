@@ -240,3 +240,88 @@ func TestPaginatedNextUrl(t *testing.T) {
 
 	assert.Equal(t, expected, data)
 }
+
+func TestParallelSimple(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/items/1": "testdata/crawler/parallel/item_1.json",
+		"https://api.example.com/items/2": "testdata/crawler/parallel/item_2.json",
+		"https://api.example.com/items/3": "testdata/crawler/parallel/item_3.json",
+		"https://api.example.com/items/4": "testdata/crawler/parallel/item_4.json",
+		"https://api.example.com/items/5": "testdata/crawler/parallel/item_5.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/parallel/simple.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/parallel/simple_output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
+func TestParallelRateLimited(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/items/1": "testdata/crawler/parallel/item_1.json",
+		"https://api.example.com/items/2": "testdata/crawler/parallel/item_2.json",
+		"https://api.example.com/items/3": "testdata/crawler/parallel/item_3.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/parallel/ratelimited.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/parallel/ratelimited_output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
+func TestParallelNoopMerge(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/items/1": "testdata/crawler/parallel/item_1.json",
+		"https://api.example.com/items/2": "testdata/crawler/parallel/item_2.json",
+		"https://api.example.com/items/3": "testdata/crawler/parallel/item_3.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/parallel/noop_merge.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	// Parallel execution doesn't guarantee order, so check for set equality
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+
+	items, ok := resultMap["items"].([]interface{})
+	require.True(t, ok, "items should be an array")
+	require.Len(t, items, 3, "Should have 3 items")
+
+	// Check that all expected IDs are present
+	ids := make(map[float64]bool)
+	for _, item := range items {
+		itemMap := item.(map[string]interface{})
+		id := itemMap["id"].(float64)
+		ids[id] = true
+	}
+
+	assert.True(t, ids[1], "Should contain item with id 1")
+	assert.True(t, ids[2], "Should contain item with id 2")
+	assert.True(t, ids[3], "Should contain item with id 3")
+}

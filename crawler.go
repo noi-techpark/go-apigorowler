@@ -16,8 +16,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 
 	"github.com/itchyny/gojq"
+	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -80,12 +82,18 @@ func (l *stdLogger) Error(msg string, args ...any) {
 
 const RES_KEY = "$res"
 
+type RateLimitConfig struct {
+	RequestsPerSecond float64 `yaml:"requestsPerSecond" json:"requestsPerSecond"`
+}
+
 type Config struct {
 	Steps          []Step               `yaml:"steps" json:"steps"`
 	RootContext    interface{}          `yaml:"rootContext" json:"rootContext"`
 	Authentication *AuthenticatorConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 	Headers        map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
 	Stream         bool                 `yaml:"stream,omitempty" json:"stream,omitempty"`
+	MaxConcurrency int                  `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
+	RateLimit      *RateLimitConfig     `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
 }
 
 type Step struct {
@@ -101,6 +109,9 @@ type Step struct {
 	MergeOn           string                `yaml:"mergeOn,omitempty" json:"mergeOn,omitempty"`
 	MergeWithContext  *MergeWithContextRule `yaml:"mergeWithContext,omitempty" json:"mergeWithContext,omitempty"`
 	NoopMerge         bool                  `yaml:"noopMerge,omitempty" json:"noopMerge,omitempty"`
+	Parallel          bool                  `yaml:"parallel,omitempty" json:"parallel,omitempty"`
+	MaxConcurrency    int                   `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
+	RateLimit         *RateLimitConfig      `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
 }
 
 type RequestConfig struct {
@@ -151,6 +162,22 @@ type httpRequestContext struct {
 	authenticator Authenticator
 }
 
+// forEachResult holds the result of a single forEach iteration
+type forEachResult struct {
+	index          int
+	result         any
+	profilerEvents []StepProfilerData
+	err            error
+}
+
+// parallelExecutor manages parallel execution of forEach iterations
+type parallelExecutor struct {
+	maxConcurrency int
+	rateLimiter    *rate.Limiter
+	resultsChan    chan forEachResult
+	profilerMutex  sync.Mutex
+}
+
 type ApiCrawler struct {
 	Config              Config
 	ContextMap          map[string]*Context
@@ -162,6 +189,7 @@ type ApiCrawler struct {
 	enableProfilation   bool
 	templateCache       map[string]*template.Template
 	jqCache             map[string]*gojq.Code
+	mergeMutex          sync.Mutex // Protects concurrent merge operations
 }
 
 func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
@@ -501,6 +529,158 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	return nil
 }
 
+// createRateLimiter creates a rate limiter from config, returns nil if no rate limiting
+func createRateLimiter(stepLimit, globalLimit *RateLimitConfig) *rate.Limiter {
+	var limitConfig *RateLimitConfig
+
+	// Step-level rate limit takes precedence
+	if stepLimit != nil {
+		limitConfig = stepLimit
+	} else if globalLimit != nil {
+		limitConfig = globalLimit
+	}
+
+	if limitConfig == nil || limitConfig.RequestsPerSecond <= 0 {
+		return nil
+	}
+
+	return rate.NewLimiter(rate.Limit(limitConfig.RequestsPerSecond), 1)
+}
+
+// executeForEachIteration executes a single forEach iteration
+func (c *ApiCrawler) executeForEachIteration(
+	ctx context.Context,
+	index int,
+	item any,
+	exec *stepExecution,
+	profilerEnabled bool,
+) forEachResult {
+	result := forEachResult{
+		index:          index,
+		profilerEvents: make([]StepProfilerData, 0),
+	}
+
+	c.logger.Info("[ForEach] Iteration %d as '%s'", index, exec.step.As, "item", item)
+
+	childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
+
+	// Capture profiler events if enabled
+	if profilerEnabled {
+		result.profilerEvents = append(result.profilerEvents, StepProfilerData{
+			Type: STEP_PROFILER_TYPE_NONE,
+			Name: fmt.Sprintf("Selection #%d", index),
+			Data: item,
+		})
+	}
+
+	// Execute nested steps
+	for _, nested := range exec.step.Steps {
+		newExec := newStepExecution(nested, exec.step.As, childContextMap)
+		if err := c.ExecuteStep(ctx, newExec); err != nil {
+			result.err = err
+			return result
+		}
+	}
+
+	result.result = childContextMap[exec.step.As].Data
+
+	if profilerEnabled {
+		result.profilerEvents = append(result.profilerEvents, StepProfilerData{
+			Type: STEP_PROFILER_TYPE_NONE,
+			Name: fmt.Sprintf("Result #%d", index),
+			Data: result.result,
+		})
+	}
+
+	return result
+}
+
+// executeForEachParallel executes forEach iterations in parallel
+func (c *ApiCrawler) executeForEachParallel(
+	ctx context.Context,
+	exec *stepExecution,
+	items []interface{},
+	maxConcurrency int,
+	rateLimiter *rate.Limiter,
+) ([]interface{}, error) {
+	profilerEnabled := c.profiler != nil
+	numItems := len(items)
+
+	// Results channel sized to hold all results
+	resultsChan := make(chan forEachResult, numItems)
+
+	// Error group for managing goroutines
+	var wg sync.WaitGroup
+
+	// Semaphore for concurrency control
+	semaphore := make(chan struct{}, maxConcurrency)
+
+	// Launch workers for each item
+	for i, item := range items {
+		wg.Add(1)
+
+		go func(index int, item any) {
+			defer wg.Done()
+
+			// Acquire semaphore slot
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			// Check context cancellation
+			select {
+			case <-ctx.Done():
+				resultsChan <- forEachResult{index: index, err: ctx.Err()}
+				return
+			default:
+			}
+
+			// Apply rate limiting if configured
+			if rateLimiter != nil {
+				if err := rateLimiter.Wait(ctx); err != nil {
+					resultsChan <- forEachResult{index: index, err: err}
+					return
+				}
+			}
+
+			// Execute iteration
+			result := c.executeForEachIteration(ctx, index, item, exec, profilerEnabled)
+			resultsChan <- result
+		}(i, item)
+	}
+
+	// Close results channel when all workers complete
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results and maintain order
+	results := make([]forEachResult, numItems)
+	for result := range resultsChan {
+		if result.err != nil {
+			return nil, result.err
+		}
+		results[result.index] = result
+	}
+
+	// Emit profiler events in order if profiling is enabled
+	if profilerEnabled {
+		for _, result := range results {
+			for _, event := range result.profilerEvents {
+				c.pushProfilerData(event.Type, event.Name, exec, event.Data, event.DataBefore, event.Extra)
+			}
+		}
+	}
+
+	// Extract execution results in order
+	executionResults := make([]interface{}, numItems)
+	for i, result := range results {
+		executionResults[i] = result.result
+	}
+
+	return executionResults, nil
+}
+
 func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) error {
 	c.logger.Info("[Foreach] Preparing %s", exec.step.Name)
 
@@ -544,31 +724,57 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	profileStepName := fmt.Sprintf("Foreach Extract '%s'", exec.step.Name)
 	c.pushProfilerData(STEP_PROFILER_TYPE_START, profileStepName, exec, results, nil)
 
-	// Execute nested steps for each item
-	executionResults := make([]interface{}, 0)
-	for i, item := range results {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	// Determine execution mode and parameters
+	var executionResults []interface{}
+	var err error
+
+	if exec.step.Parallel {
+		// Determine max concurrency (step > global > default)
+		maxConcurrency := exec.step.MaxConcurrency
+		if maxConcurrency == 0 {
+			maxConcurrency = c.Config.MaxConcurrency
+		}
+		if maxConcurrency == 0 {
+			maxConcurrency = 10 // Default concurrency
 		}
 
-		c.logger.Info("[ForEach] Iteration %d as '%s'", i, exec.step.As, "item", item)
+		// Create rate limiter if configured
+		rateLimiter := createRateLimiter(exec.step.RateLimit, c.Config.RateLimit)
 
-		childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
+		c.logger.Info("[ForEach] Executing %d iterations in parallel (max concurrency: %d)", len(results), maxConcurrency)
 
-		c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Selection #%d", i), exec, item, nil)
-
-		for _, nested := range exec.step.Steps {
-			newExec := newStepExecution(nested, exec.step.As, childContextMap)
-			if err := c.ExecuteStep(ctx, newExec); err != nil {
-				return err
+		// Execute in parallel
+		executionResults, err = c.executeForEachParallel(ctx, exec, results, maxConcurrency, rateLimiter)
+		if err != nil {
+			return err
+		}
+	} else {
+		// Execute sequentially (original behavior)
+		executionResults = make([]interface{}, 0)
+		for i, item := range results {
+			// Check for context cancellation
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
 			}
-		}
 
-		c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Result #%d", i), exec, childContextMap[exec.step.As].Data, nil)
-		executionResults = append(executionResults, childContextMap[exec.step.As].Data)
+			c.logger.Info("[ForEach] Iteration %d as '%s'", i, exec.step.As, "item", item)
+
+			childContextMap := childMapWith(exec.contextMap, exec.currentContext, exec.step.As, item)
+
+			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Selection #%d", i), exec, item, nil)
+
+			for _, nested := range exec.step.Steps {
+				newExec := newStepExecution(nested, exec.step.As, childContextMap)
+				if err := c.ExecuteStep(ctx, newExec); err != nil {
+					return err
+				}
+			}
+
+			c.pushProfilerData(STEP_PROFILER_TYPE_NONE, fmt.Sprintf("Result #%d", i), exec, childContextMap[exec.step.As].Data, nil)
+			executionResults = append(executionResults, childContextMap[exec.step.As].Data)
+		}
 	}
 
 	// Determine merge strategy
@@ -576,7 +782,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	dataBefore := exec.currentContext.Data
 
 	// Check if custom merge rules are specified
-	hasCustomMerge := exec.step.MergeOn != "" || exec.step.MergeWithParentOn != "" || exec.step.MergeWithContext != nil
+	hasCustomMerge := exec.step.MergeOn != "" || exec.step.MergeWithParentOn != "" || exec.step.MergeWithContext != nil || exec.step.NoopMerge
 
 	if hasCustomMerge {
 		// Use custom merge logic (same as request steps)
@@ -669,7 +875,12 @@ func applyMergeRule(c *ApiCrawler, contextData any, rule string, result any, tem
 
 // performMerge applies the appropriate merge strategy based on step configuration
 // Returns the profiler step name and error if any. The actual context is modified in place.
+// Thread-safe: Uses mutex to protect concurrent access to contexts.
 func (c *ApiCrawler) performMerge(op mergeOperation) (profilerStepName string, err error) {
+	// Lock for thread-safe merge operations
+	c.mergeMutex.Lock()
+	defer c.mergeMutex.Unlock()
+
 	// Check for noop merge (skip merging entirely)
 	if op.step.NoopMerge {
 		c.logger.Debug("[Merge] noop merge - skipping")
