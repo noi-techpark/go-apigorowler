@@ -258,45 +258,65 @@ export class StepDetailsPanel {
             <script nonce="${nonce}">
                 const vscode = acquireVsCodeApi();
 
-                function copyToClipboard(text) {
-                    vscode.postMessage({
-                        command: 'copy',
-                        text: text
+                // Wait for DOM to load
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Setup copy buttons
+                    document.querySelectorAll('.btn-copy').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const targetId = this.getAttribute('data-target');
+                            const targetElement = document.getElementById(targetId);
+                            if (targetElement) {
+                                const text = targetElement.textContent;
+                                vscode.postMessage({
+                                    command: 'copy',
+                                    text: text
+                                });
+                            }
+                        });
                     });
-                }
 
-                function showView(viewId, clickedButton) {
-                    // Hide all comparison views in the same section
-                    const selectedView = document.getElementById(viewId);
-                    if (!selectedView) return;
+                    // Setup view switcher buttons
+                    document.querySelectorAll('.btn-view').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const viewId = this.getAttribute('data-view');
+                            const selectedView = document.getElementById(viewId);
+                            if (!selectedView) return;
 
-                    // Find parent section
-                    const section = selectedView.closest('.section');
-                    if (!section) return;
+                            // Find parent section
+                            const section = selectedView.closest('.section');
+                            if (!section) return;
 
-                    // Hide all comparison views in this section
-                    const views = section.querySelectorAll('.comparison-view');
-                    views.forEach(view => view.style.display = 'none');
+                            // Hide all comparison views in this section
+                            const views = section.querySelectorAll('.comparison-view');
+                            views.forEach(view => view.style.display = 'none');
 
-                    // Show the selected view
-                    selectedView.style.display = 'block';
+                            // Show the selected view
+                            selectedView.style.display = 'block';
 
-                    // Update button active states in this section
-                    const buttons = section.querySelectorAll('.btn-view');
-                    buttons.forEach(btn => btn.classList.remove('active'));
-
-                    if (clickedButton) {
-                        clickedButton.classList.add('active');
-                    }
-                }
-
-                function openInTab(content, title) {
-                    vscode.postMessage({
-                        command: 'openInTab',
-                        content: content,
-                        title: title
+                            // Update button active states in this section
+                            const buttons = section.querySelectorAll('.btn-view');
+                            buttons.forEach(btn => btn.classList.remove('active'));
+                            this.classList.add('active');
+                        });
                     });
-                }
+
+                    // Setup open in tab buttons
+                    document.querySelectorAll('.btn-open-tab').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const targetId = this.getAttribute('data-target');
+                            const title = this.getAttribute('data-title') || 'JSON';
+                            const targetElement = document.getElementById(targetId);
+                            if (targetElement) {
+                                const content = targetElement.textContent;
+                                vscode.postMessage({
+                                    command: 'openInTab',
+                                    content: content,
+                                    title: title
+                                });
+                            }
+                        });
+                    });
+                });
             </script>
         </body>
         </html>`;
@@ -350,12 +370,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Initial Context Map</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(contextMap)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="root-context-map">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Context Map</summary>
-                    <div class="code-block">${escapeHtml(contextMap)}</div>
+                    <div class="code-block" id="root-context-map">${escapeHtml(contextMap)}</div>
                 </details>
             </div>
 
@@ -363,12 +383,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Configuration</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(config)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="root-config">📋 Copy</button>
                     </div>
                 </div>
                 <details>
                     <summary>Crawler Configuration</summary>
-                    <div class="code-block">${escapeHtml(config)}</div>
+                    <div class="code-block" id="root-config">${escapeHtml(config)}</div>
                 </details>
             </div>
         `;
@@ -377,6 +397,7 @@ export class StepDetailsPanel {
     private renderRequestStep(data: StepProfilerData): string {
         const stepConfig = JSON.stringify(data.data?.stepConfig || {}, null, 2);
         const duration = data.duration ? `${data.duration}ms (${(data.duration / 1000).toFixed(3)}s)` : 'In progress...';
+        const configId = `request-step-config-${data.id}`;
 
         return `
             <div class="header">
@@ -389,12 +410,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Step Configuration</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(stepConfig)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${configId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Configuration</summary>
-                    <div class="code-block">${escapeHtml(stepConfig)}</div>
+                    <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
                 </details>
             </div>
         `;
@@ -403,6 +424,7 @@ export class StepDetailsPanel {
     private renderForEachStep(data: StepProfilerData): string {
         const stepConfig = JSON.stringify(data.data?.stepConfig || {}, null, 2);
         const duration = data.duration ? `${data.duration}ms` : 'In progress...';
+        const configId = `foreach-step-config-${data.id}`;
 
         return `
             <div class="header">
@@ -415,12 +437,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Step Configuration</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(stepConfig)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${configId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Configuration</summary>
-                    <div class="code-block">${escapeHtml(stepConfig)}</div>
+                    <div class="code-block" id="${configId}">${escapeHtml(stepConfig)}</div>
                 </details>
             </div>
         `;
@@ -431,6 +453,8 @@ export class StepDetailsPanel {
         const currentKey = data.data?.currentContextKey || '';
         const contextData = JSON.stringify(data.data?.currentContextData || {}, null, 2);
         const fullContextMap = JSON.stringify(data.data?.fullContextMap || {}, null, 2);
+        const contextDataId = `context-data-${data.id}`;
+        const fullContextMapId = `full-context-map-${data.id}`;
 
         return `
             <div class="header">
@@ -452,12 +476,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Current Context Data</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(contextData)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${contextDataId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Context Data</summary>
-                    <div class="code-block">${escapeHtml(contextData)}</div>
+                    <div class="code-block" id="${contextDataId}">${escapeHtml(contextData)}</div>
                 </details>
             </div>
 
@@ -465,12 +489,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Full Context Map (after selection)</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(fullContextMap)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${fullContextMapId}">📋 Copy</button>
                     </div>
                 </div>
                 <details>
                     <summary>Click to show updated context map</summary>
-                    <div class="code-block">${escapeHtml(fullContextMap)}</div>
+                    <div class="code-block" id="${fullContextMapId}">${escapeHtml(fullContextMap)}</div>
                 </details>
             </div>
         `;
@@ -482,6 +506,8 @@ export class StepDetailsPanel {
         const previousResponse = JSON.stringify(data.data?.previousResponse || {}, null, 2);
         const beforeState = data.data?.previousState || {};
         const afterState = data.data?.afterState || {};
+        const paginationConfigId = `pagination-config-${data.id}`;
+        const previousResponseId = `previous-response-${data.id}`;
 
         return `
             <div class="header">
@@ -494,12 +520,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Pagination Configuration</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(paginationConfig)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${paginationConfigId}">📋 Copy</button>
                     </div>
                 </div>
                 <details>
                     <summary>Configuration</summary>
-                    <div class="code-block">${escapeHtml(paginationConfig)}</div>
+                    <div class="code-block" id="${paginationConfigId}">${escapeHtml(paginationConfig)}</div>
                 </details>
             </div>
 
@@ -507,12 +533,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Previous Response (used for extraction)</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(previousResponse)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${previousResponseId}">📋 Copy</button>
                     </div>
                 </div>
                 <details>
                     <summary>Click to show response body and headers</summary>
-                    <div class="code-block">${escapeHtml(previousResponse)}</div>
+                    <div class="code-block" id="${previousResponseId}">${escapeHtml(previousResponse)}</div>
                 </details>
             </div>
 
@@ -539,6 +565,7 @@ export class StepDetailsPanel {
         const resultUrl = data.data?.resultUrl || '';
         const resultHeaders = JSON.stringify(data.data?.resultHeaders || {}, null, 2);
         const resultBody = JSON.stringify(data.data?.resultBody || {}, null, 2);
+        const resultUrlId = `result-url-${data.id}`;
 
         return `
             <div class="header">
@@ -575,10 +602,10 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">✅ Resulting URL</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(resultUrl)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${resultUrlId}">📋 Copy</button>
                     </div>
                 </div>
-                <div class="code-block">${escapeHtml(resultUrl)}</div>
+                <div class="code-block" id="${resultUrlId}">${escapeHtml(resultUrl)}</div>
             </div>
 
             <div class="section">
@@ -603,6 +630,7 @@ export class StepDetailsPanel {
         const curl = data.data?.curl || '';
         const headers = JSON.stringify(data.data?.headers || {}, null, 2);
         const body = JSON.stringify(data.data?.body || {}, null, 2);
+        const curlId = `curl-command-${data.id}`;
 
         return `
             <div class="header">
@@ -619,10 +647,10 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">💻 curl Command</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(curl)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${curlId}">📋 Copy</button>
                     </div>
                 </div>
-                <div class="code-block">${escapeHtml(curl)}</div>
+                <div class="code-block" id="${curlId}">${escapeHtml(curl)}</div>
             </div>
 
             <div class="section">
@@ -678,13 +706,13 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Response Body</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(body)}\`)">📋 Copy</button>
-                        <button class="btn" onclick="openInTab(\`${escapeHtml(body)}\`, 'Response Body')">📄 Open in Tab</button>
+                        <button class="btn btn-copy" data-target="response-body-${data.id}">📋 Copy</button>
+                        <button class="btn btn-open-tab" data-target="response-body-${data.id}" data-title="Response Body">📄 Open in Tab</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Body Content</summary>
-                    <div class="code-block">${escapeHtml(body)}</div>
+                    <div class="code-block" id="response-body-${data.id}">${escapeHtml(body)}</div>
                 </details>
             </div>
         `;
@@ -710,9 +738,9 @@ export class StepDetailsPanel {
             <div class="section">
                 <div class="section-title">Comparison</div>
                 <div class="section-header">
-                    <button class="btn btn-view active" data-view="before-transform" onclick="showView('before-transform', this)">Before</button>
-                    <button class="btn btn-view" data-view="after-transform" onclick="showView('after-transform', this)">After</button>
-                    <button class="btn btn-view" data-view="diff-transform" onclick="showView('diff-transform', this)">Diff</button>
+                    <button class="btn btn-view active" data-view="before-transform">Before</button>
+                    <button class="btn btn-view" data-view="after-transform">After</button>
+                    <button class="btn btn-view" data-view="diff-transform">Diff</button>
                 </div>
 
                 <div id="before-transform" class="comparison-view" style="display: block;">
@@ -759,9 +787,9 @@ export class StepDetailsPanel {
             <div class="section">
                 <div class="section-title">Target Context Comparison</div>
                 <div class="section-header">
-                    <button class="btn btn-view active" data-view="before-merge" onclick="showView('before-merge', this)">Before</button>
-                    <button class="btn btn-view" data-view="after-merge" onclick="showView('after-merge', this)">After</button>
-                    <button class="btn btn-view" data-view="diff-merge" onclick="showView('diff-merge', this)">Diff</button>
+                    <button class="btn btn-view active" data-view="before-merge">Before</button>
+                    <button class="btn btn-view" data-view="after-merge">After</button>
+                    <button class="btn btn-view" data-view="diff-merge">Diff</button>
                 </div>
 
                 <div id="before-merge" class="comparison-view" style="display: block;">
@@ -821,6 +849,8 @@ export class StepDetailsPanel {
         const itemValue = JSON.stringify(data.data?.itemValue || {}, null, 2);
         const currentKey = data.data?.currentContextKey || '';
         const contextData = JSON.stringify(data.data?.currentContextData || {}, null, 2);
+        const itemValueId = `item-value-${data.id}`;
+        const contextDataId = `item-context-data-${data.id}`;
 
         return `
             <div class="header">
@@ -843,12 +873,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Item Value</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(itemValue)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${itemValueId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Value</summary>
-                    <div class="code-block">${escapeHtml(itemValue)}</div>
+                    <div class="code-block" id="${itemValueId}">${escapeHtml(itemValue)}</div>
                 </details>
             </div>
 
@@ -856,12 +886,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Current Context Data</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(contextData)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${contextDataId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Context</summary>
-                    <div class="code-block">${escapeHtml(contextData)}</div>
+                    <div class="code-block" id="${contextDataId}">${escapeHtml(contextData)}</div>
                 </details>
             </div>
         `;
@@ -870,6 +900,7 @@ export class StepDetailsPanel {
     private renderResult(data: StepProfilerData): string {
         const result = JSON.stringify(data.data?.result || data.data?.entity || {}, null, 2);
         const index = data.data?.index;
+        const resultId = `result-data-${data.id}`;
 
         return `
             <div class="header">
@@ -881,12 +912,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Result Data</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(result)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${resultId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Data</summary>
-                    <div class="code-block">${escapeHtml(result)}</div>
+                    <div class="code-block" id="${resultId}">${escapeHtml(result)}</div>
                 </details>
             </div>
         `;
@@ -894,6 +925,7 @@ export class StepDetailsPanel {
 
     private renderGeneric(data: StepProfilerData): string {
         const dataStr = JSON.stringify(data.data || {}, null, 2);
+        const dataId = `generic-data-${data.id}`;
 
         return `
             <div class="header">
@@ -905,12 +937,12 @@ export class StepDetailsPanel {
                 <div class="section-header">
                     <div class="section-title">Data</div>
                     <div class="actions">
-                        <button class="btn" onclick="copyToClipboard(\`${escapeHtml(dataStr)}\`)">📋 Copy</button>
+                        <button class="btn btn-copy" data-target="${dataId}">📋 Copy</button>
                     </div>
                 </div>
                 <details open>
                     <summary>Details</summary>
-                    <div class="code-block">${escapeHtml(dataStr)}</div>
+                    <div class="code-block" id="${dataId}">${escapeHtml(dataStr)}</div>
                 </details>
             </div>
         `;

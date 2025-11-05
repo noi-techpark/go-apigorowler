@@ -888,7 +888,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		// Emit CONTEXT_SELECTION event (context created for nested steps)
 		if c.profiler != nil && len(exec.step.Steps) > 0 {
-			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", stepID, exec.step)
+			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", pageID, exec.step)
 			contextPath := buildContextPath(childContextMap, thisContextKey)
 			event.Data = map[string]any{
 				"contextPath":         contextPath,
@@ -900,7 +900,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		}
 
 		for _, step := range exec.step.Steps {
-			newExec := newStepExecution(step, thisContextKey, childContextMap, stepID)
+			newExec := newStepExecution(step, thisContextKey, childContextMap, pageID)
 			if err := c.ExecuteStep(ctx, newExec); err != nil {
 				return err
 			}
@@ -971,7 +971,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 				// Emit STREAM_RESULT event
 				if c.profiler != nil {
-					streamEvent := newProfilerEvent(EVENT_STREAM_RESULT, "Stream Result", stepID, exec.step)
+					streamEvent := newProfilerEvent(EVENT_STREAM_RESULT, "Stream Result", pageID, exec.step)
 					streamEvent.Data = map[string]any{
 						"entity": copyDataSafe(d),
 						"index":  len(array_data),
@@ -982,18 +982,34 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			exec.currentContext.Data = []interface{}{}
 		}
 
-		// Emit REQUEST_PAGE_END event
-		if c.profiler != nil {
-			event := newProfilerEvent(EVENT_REQUEST_PAGE_END, fmt.Sprintf("Page %d End", pageNum), pageID, exec.step)
-			event.Duration = time.Since(pageStartTime).Milliseconds()
+		// Emit REQUEST_PAGE_END event (reuse START event ID)
+		if c.profiler != nil && pageID != "" {
+			event := StepProfilerData{
+				ID:        pageID, // Reuse START event ID
+				ParentID:  stepID,
+				Type:      EVENT_REQUEST_PAGE_END,
+				Name:      fmt.Sprintf("Page %d End", pageNum),
+				Step:      exec.step,
+				Timestamp: time.Now(),
+				Duration:  time.Since(pageStartTime).Milliseconds(),
+				Data:      make(map[string]any),
+			}
 			c.profiler <- event
 		}
 	}
 
-	// Emit REQUEST_STEP_END event
-	if c.profiler != nil {
-		event := newProfilerEvent(EVENT_REQUEST_STEP_END, exec.step.Name+" End", stepID, exec.step)
-		event.Duration = time.Since(stepStartTime).Milliseconds()
+	// Emit REQUEST_STEP_END event (reuse START event ID)
+	if c.profiler != nil && stepID != "" {
+		event := StepProfilerData{
+			ID:        stepID, // Reuse START event ID
+			ParentID:  exec.parentID,
+			Type:      EVENT_REQUEST_STEP_END,
+			Name:      exec.step.Name + " End",
+			Step:      exec.step,
+			Timestamp: time.Now(),
+			Duration:  time.Since(stepStartTime).Milliseconds(),
+			Data:      make(map[string]any),
+		}
 		c.profiler <- event
 	}
 
@@ -1389,10 +1405,18 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 		exec.currentContext.Data = []interface{}{}
 	}
 
-	// Emit FOREACH_STEP_END event
-	if c.profiler != nil {
-		event := newProfilerEvent(EVENT_FOREACH_STEP_END, exec.step.Name+" End", stepID, exec.step)
-		event.Duration = time.Since(stepStartTime).Milliseconds()
+	// Emit FOREACH_STEP_END event (reuse START event ID)
+	if c.profiler != nil && stepID != "" {
+		event := StepProfilerData{
+			ID:        stepID, // Reuse START event ID
+			ParentID:  exec.parentID,
+			Type:      EVENT_FOREACH_STEP_END,
+			Name:      exec.step.Name + " End",
+			Step:      exec.step,
+			Timestamp: time.Now(),
+			Duration:  time.Since(stepStartTime).Milliseconds(),
+			Data:      make(map[string]any),
+		}
 		c.profiler <- event
 	}
 
