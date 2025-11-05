@@ -270,14 +270,16 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
             eventType === ProfileEventType.EVENT_FOREACH_STEP_END ||
             eventType === ProfileEventType.EVENT_REQUEST_PAGE_END) {
 
-            // Find the corresponding START event by parentId
+            // Find the corresponding START event by ID
             // END events share the same ID as their START events in our system
             const startItem = this.stepMap.get(profilerData.id);
             if (startItem && profilerData.duration !== undefined) {
                 // Enrich the START event with duration
                 startItem.data.duration = profilerData.duration;
                 startItem.description = `${profilerData.duration}ms`;
-                this.refresh();
+
+                // Fire change event for this specific item to update the tree
+                this._onDidChangeTreeData.fire(startItem);
             }
             return; // Don't create a separate tree item for END events
         }

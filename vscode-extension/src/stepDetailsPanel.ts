@@ -17,6 +17,9 @@ export class StepDetailsPanel {
                         vscode.env.clipboard.writeText(message.text);
                         vscode.window.showInformationMessage('Copied to clipboard');
                         break;
+                    case 'openInTab':
+                        this.openJsonInTab(message.content, message.title);
+                        break;
                 }
             },
             null,
@@ -27,11 +30,11 @@ export class StepDetailsPanel {
     }
 
     public static createOrShow(extensionUri: vscode.Uri, data: StepProfilerData) {
-        const column = vscode.ViewColumn.Two;
+        const column = vscode.ViewColumn.Active;
 
         // If we already have a panel, show it
         if (StepDetailsPanel.currentPanel) {
-            StepDetailsPanel.currentPanel.panel.reveal(column);
+            StepDetailsPanel.currentPanel.panel.reveal(column, false);
             StepDetailsPanel.currentPanel.update(data);
             return;
         }
@@ -67,6 +70,17 @@ export class StepDetailsPanel {
                 disposable.dispose();
             }
         }
+    }
+
+    private async openJsonInTab(content: string, title: string) {
+        const doc = await vscode.workspace.openTextDocument({
+            content: content,
+            language: 'json'
+        });
+        await vscode.window.showTextDocument(doc, {
+            viewColumn: vscode.ViewColumn.Beside,
+            preview: false
+        });
     }
 
     private getHtmlForStep(data: StepProfilerData): string {
@@ -130,16 +144,25 @@ export class StepDetailsPanel {
                 .btn:hover {
                     background: var(--vscode-button-hoverBackground);
                 }
+                .btn-view.active {
+                    background: var(--vscode-button-hoverBackground);
+                    border: 2px solid var(--vscode-focusBorder);
+                }
                 .code-block {
                     background: var(--vscode-textCodeBlock-background);
                     border: 1px solid var(--vscode-panel-border);
                     border-radius: 3px;
                     padding: 12px;
                     overflow-x: auto;
+                    max-height: 500px;
+                    overflow-y: auto;
                     font-family: var(--vscode-editor-font-family);
                     font-size: 0.9em;
                     white-space: pre-wrap;
                     word-wrap: break-word;
+                }
+                .code-block-large {
+                    max-height: 800px;
                 }
                 .side-by-side {
                     display: grid;
@@ -194,6 +217,40 @@ export class StepDetailsPanel {
                 summary:hover {
                     background: var(--vscode-list-activeSelectionBackground);
                 }
+                .comparison-view {
+                    margin-top: 10px;
+                }
+                .diff-container {
+                    max-height: 600px;
+                    overflow-y: auto;
+                    background: var(--vscode-textCodeBlock-background);
+                    border: 1px solid var(--vscode-panel-border);
+                    border-radius: 3px;
+                    padding: 12px;
+                }
+                .diff-view {
+                    font-family: var(--vscode-editor-font-family);
+                    font-size: 0.9em;
+                    line-height: 1.5;
+                }
+                .diff-line {
+                    padding: 2px 8px;
+                    margin: 0;
+                    white-space: pre-wrap;
+                    word-wrap: break-word;
+                }
+                .diff-added {
+                    background: var(--vscode-diffEditor-insertedTextBackground, rgba(0, 255, 0, 0.15));
+                    color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+                }
+                .diff-removed {
+                    background: var(--vscode-diffEditor-removedTextBackground, rgba(255, 0, 0, 0.15));
+                    color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+                }
+                .diff-unchanged {
+                    color: var(--vscode-editor-foreground);
+                    opacity: 0.6;
+                }
             </style>
         </head>
         <body>
@@ -205,6 +262,39 @@ export class StepDetailsPanel {
                     vscode.postMessage({
                         command: 'copy',
                         text: text
+                    });
+                }
+
+                function showView(viewId, clickedButton) {
+                    // Hide all comparison views in the same section
+                    const selectedView = document.getElementById(viewId);
+                    if (!selectedView) return;
+
+                    // Find parent section
+                    const section = selectedView.closest('.section');
+                    if (!section) return;
+
+                    // Hide all comparison views in this section
+                    const views = section.querySelectorAll('.comparison-view');
+                    views.forEach(view => view.style.display = 'none');
+
+                    // Show the selected view
+                    selectedView.style.display = 'block';
+
+                    // Update button active states in this section
+                    const buttons = section.querySelectorAll('.btn-view');
+                    buttons.forEach(btn => btn.classList.remove('active'));
+
+                    if (clickedButton) {
+                        clickedButton.classList.add('active');
+                    }
+                }
+
+                function openInTab(content, title) {
+                    vscode.postMessage({
+                        command: 'openInTab',
+                        content: content,
+                        title: title
                     });
                 }
             </script>
@@ -589,6 +679,7 @@ export class StepDetailsPanel {
                     <div class="section-title">Response Body</div>
                     <div class="actions">
                         <button class="btn" onclick="copyToClipboard(\`${escapeHtml(body)}\`)">📋 Copy</button>
+                        <button class="btn" onclick="openInTab(\`${escapeHtml(body)}\`, 'Response Body')">📄 Open in Tab</button>
                     </div>
                 </div>
                 <details open>
@@ -603,6 +694,7 @@ export class StepDetailsPanel {
         const transformRule = data.data?.transformRule || '';
         const before = JSON.stringify(data.data?.beforeResponse || {}, null, 2);
         const after = JSON.stringify(data.data?.afterResponse || {}, null, 2);
+        const diff = this.computeDiff(before, after);
 
         return `
             <div class="header">
@@ -616,16 +708,23 @@ export class StepDetailsPanel {
             </div>
 
             <div class="section">
-                <div class="section-title">Before/After Comparison</div>
-                <div class="side-by-side">
-                    <div>
-                        <h4>Before Transform</h4>
-                        <div class="code-block">${escapeHtml(before)}</div>
-                    </div>
-                    <div>
-                        <h4>After Transform</h4>
-                        <div class="code-block">${escapeHtml(after)}</div>
-                    </div>
+                <div class="section-title">Comparison</div>
+                <div class="section-header">
+                    <button class="btn btn-view active" data-view="before-transform" onclick="showView('before-transform', this)">Before</button>
+                    <button class="btn btn-view" data-view="after-transform" onclick="showView('after-transform', this)">After</button>
+                    <button class="btn btn-view" data-view="diff-transform" onclick="showView('diff-transform', this)">Diff</button>
+                </div>
+
+                <div id="before-transform" class="comparison-view" style="display: block;">
+                    <div class="code-block">${escapeHtml(before)}</div>
+                </div>
+
+                <div id="after-transform" class="comparison-view" style="display: none;">
+                    <div class="code-block">${escapeHtml(after)}</div>
+                </div>
+
+                <div id="diff-transform" class="comparison-view" style="display: none;">
+                    <div class="diff-container">${diff}</div>
                 </div>
             </div>
         `;
@@ -638,6 +737,7 @@ export class StepDetailsPanel {
         const before = JSON.stringify(data.data?.targetContextBefore || {}, null, 2);
         const after = JSON.stringify(data.data?.targetContextAfter || {}, null, 2);
         const fullContextMap = JSON.stringify(data.data?.fullContextMap || {}, null, 2);
+        const diff = this.computeDiff(before, after);
 
         return `
             <div class="header">
@@ -658,15 +758,22 @@ export class StepDetailsPanel {
 
             <div class="section">
                 <div class="section-title">Target Context Comparison</div>
-                <div class="side-by-side">
-                    <div>
-                        <h4>Before Merge</h4>
-                        <div class="code-block">${escapeHtml(before)}</div>
-                    </div>
-                    <div>
-                        <h4>After Merge</h4>
-                        <div class="code-block">${escapeHtml(after)}</div>
-                    </div>
+                <div class="section-header">
+                    <button class="btn btn-view active" data-view="before-merge" onclick="showView('before-merge', this)">Before</button>
+                    <button class="btn btn-view" data-view="after-merge" onclick="showView('after-merge', this)">After</button>
+                    <button class="btn btn-view" data-view="diff-merge" onclick="showView('diff-merge', this)">Diff</button>
+                </div>
+
+                <div id="before-merge" class="comparison-view" style="display: block;">
+                    <div class="code-block">${escapeHtml(before)}</div>
+                </div>
+
+                <div id="after-merge" class="comparison-view" style="display: none;">
+                    <div class="code-block">${escapeHtml(after)}</div>
+                </div>
+
+                <div id="diff-merge" class="comparison-view" style="display: none;">
+                    <div class="diff-container">${diff}</div>
                 </div>
             </div>
 
@@ -807,6 +914,39 @@ export class StepDetailsPanel {
                 </details>
             </div>
         `;
+    }
+
+    private computeDiff(before: string, after: string): string {
+        const beforeLines = before.split('\n');
+        const afterLines = after.split('\n');
+
+        let html = '<div class="diff-view">';
+
+        // Simple line-by-line diff
+        const maxLines = Math.max(beforeLines.length, afterLines.length);
+
+        for (let i = 0; i < maxLines; i++) {
+            const beforeLine = i < beforeLines.length ? beforeLines[i] : '';
+            const afterLine = i < afterLines.length ? afterLines[i] : '';
+
+            if (beforeLine === afterLine) {
+                // Unchanged line
+                html += `<div class="diff-line diff-unchanged">${escapeHtml(beforeLine)}</div>`;
+            } else if (beforeLine && !afterLine) {
+                // Removed line
+                html += `<div class="diff-line diff-removed">- ${escapeHtml(beforeLine)}</div>`;
+            } else if (!beforeLine && afterLine) {
+                // Added line
+                html += `<div class="diff-line diff-added">+ ${escapeHtml(afterLine)}</div>`;
+            } else {
+                // Modified line - show both
+                html += `<div class="diff-line diff-removed">- ${escapeHtml(beforeLine)}</div>`;
+                html += `<div class="diff-line diff-added">+ ${escapeHtml(afterLine)}</div>`;
+            }
+        }
+
+        html += '</div>';
+        return html;
     }
 }
 
