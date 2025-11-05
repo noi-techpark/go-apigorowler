@@ -2,11 +2,12 @@ import * as vscode from 'vscode';
 import { StepsTreeProvider, StepTreeItem } from './stepsTreeProvider';
 import { CrawlerRunner } from './crawlerRunner';
 import { StepDetailsPanel } from './stepDetailsPanel';
-import { TimelinePanel } from './timelinePanel';
+import { TimelineViewProvider } from './timelineViewProvider';
 import * as Diff from 'diff';
 
 let crawlerRunner: CrawlerRunner | undefined;
 let stepsTreeProvider: StepsTreeProvider | undefined;
+let timelineViewProvider: TimelineViewProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('ApiGorowler extension is now active');
@@ -23,8 +24,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(treeView);
 
+    // Register timeline webview view provider BEFORE crawler runner
+    timelineViewProvider = new TimelineViewProvider(context.extensionUri);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            TimelineViewProvider.viewType,
+            timelineViewProvider
+        )
+    );
+
     // Initialize crawler runner
-    crawlerRunner = new CrawlerRunner(stepsTreeProvider, context);
+    crawlerRunner = new CrawlerRunner(stepsTreeProvider, timelineViewProvider, context);
 
     // Register commands
     context.subscriptions.push(
@@ -110,7 +120,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('apigorowler.collapseAllSteps', () => {
-            stepsTreeProvider?.collapseAll();
+            vscode.commands.executeCommand('workbench.actions.treeView.apigorowler.stepsExplorer.collapseAll');
         })
     );
 
@@ -136,17 +146,10 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('apigorowler.showTimeline', () => {
-            TimelinePanel.createOrShow(context.extensionUri);
-        })
-    );
-
-    // Wire up timeline callback to steps provider
+    // Wire up timeline callback to steps provider (provider already registered above)
     stepsTreeProvider.setTimelineCallback((event) => {
-        const timeline = TimelinePanel.getInstance();
-        if (timeline) {
-            timeline.addEvent(event);
+        if (timelineViewProvider) {
+            timelineViewProvider.addEvent(event);
         }
     });
 

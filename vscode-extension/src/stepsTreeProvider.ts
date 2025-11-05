@@ -238,7 +238,8 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
     }
 
     collapseAll(): void {
-        // This is handled by VSCode's built-in collapse all command
+        // VSCode handles this automatically with workbench.actions.treeView.collapseAll
+        // Just trigger a refresh to ensure the view is up to date
         this.refresh();
     }
 

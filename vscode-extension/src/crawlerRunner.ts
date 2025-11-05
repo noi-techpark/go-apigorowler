@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
 import { StepsTreeProvider, StepProfilerData } from './stepsTreeProvider';
-import { TimelinePanel } from './timelinePanel';
+import { TimelineViewProvider } from './timelineViewProvider';
 
 export class CrawlerRunner {
     private outputChannel: vscode.OutputChannel;
@@ -11,6 +11,7 @@ export class CrawlerRunner {
 
     constructor(
         private stepsProvider: StepsTreeProvider,
+        private timelineProvider: TimelineViewProvider,
         private context: vscode.ExtensionContext
     ) {
         this.outputChannel = vscode.window.createOutputChannel('ApiGorowler');
@@ -22,12 +23,9 @@ export class CrawlerRunner {
     async run(configPath: string): Promise<void> {
         this.stop();
         this.stepsProvider.clear();
+        this.timelineProvider.clear();
         this.outputChannel.clear();
         this.outputChannel.show(true);
-
-        // Open timeline panel and clear it
-        const timeline = TimelinePanel.createOrShow(this.context.extensionUri);
-        timeline.clear();
 
         const config = vscode.workspace.getConfiguration('apigorowler');
         const goPath = config.get<string>('executable.path') || 'go';

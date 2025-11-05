@@ -1,57 +1,36 @@
 import * as vscode from 'vscode';
 import { StepProfilerData, ProfileEventType } from './stepsTreeProvider';
 
-// Store events globally so they persist across panel lifecycles
+// Store events globally so they persist across view lifecycles
 let globalEvents: StepProfilerData[] = [];
 
-export class TimelinePanel {
-    private static instance: TimelinePanel | undefined;
-    private readonly panel: vscode.WebviewPanel;
-    private disposables: vscode.Disposable[] = [];
+export class TimelineViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewType = 'apigorowler.timeline';
+    private _view?: vscode.WebviewView;
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-        this.panel = panel;
+    constructor(private readonly _extensionUri: vscode.Uri) {}
 
-        this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    public resolveWebviewView(
+        webviewView: vscode.WebviewView,
+        context: vscode.WebviewViewResolveContext,
+        _token: vscode.CancellationToken,
+    ) {
+        this._view = webviewView;
 
-        this.panel.webview.onDidReceiveMessage(
-            message => {
-                switch (message.command) {
-                    case 'selectEvent':
-                        vscode.commands.executeCommand('apigorowler.showStepDetails', message.event);
-                        break;
-                }
-            },
-            null,
-            this.disposables
-        );
-    }
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this._extensionUri]
+        };
 
-    public static createOrShow(extensionUri: vscode.Uri) {
-        // If we already have a panel, show it and refresh
-        if (TimelinePanel.instance) {
-            TimelinePanel.instance.panel.reveal(vscode.ViewColumn.Two, false);
-            TimelinePanel.instance.refresh();
-            return TimelinePanel.instance;
-        }
+        webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        // Otherwise, create a new panel beside the editor
-        const panel = vscode.window.createWebviewPanel(
-            'apigorowlerTimeline',
-            'Execution Timeline',
-            vscode.ViewColumn.Two,
-            {
-                enableScripts: true,
-                retainContextWhenHidden: true
+        webviewView.webview.onDidReceiveMessage(message => {
+            switch (message.command) {
+                case 'selectEvent':
+                    vscode.commands.executeCommand('apigorowler.showStepDetails', message.event);
+                    break;
             }
-        );
-
-        TimelinePanel.instance = new TimelinePanel(panel, extensionUri);
-        return TimelinePanel.instance;
-    }
-
-    public static getInstance(): TimelinePanel | undefined {
-        return TimelinePanel.instance;
+        });
     }
 
     public addEvent(event: StepProfilerData) {
@@ -65,23 +44,12 @@ export class TimelinePanel {
     }
 
     private refresh() {
-        this.panel.webview.html = this.getHtmlContent();
-    }
-
-    public dispose() {
-        TimelinePanel.instance = undefined;
-
-        this.panel.dispose();
-
-        while (this.disposables.length) {
-            const disposable = this.disposables.pop();
-            if (disposable) {
-                disposable.dispose();
-            }
+        if (this._view) {
+            this._view.webview.html = this._getHtmlForWebview(this._view.webview);
         }
     }
 
-    private getHtmlContent(): string {
+    private _getHtmlForWebview(webview: vscode.Webview) {
         const nonce = getNonce();
 
         return `<!DOCTYPE html>
@@ -97,37 +65,38 @@ export class TimelinePanel {
                     font-size: var(--vscode-font-size);
                     color: var(--vscode-foreground);
                     background-color: var(--vscode-editor-background);
-                    padding: 20px;
+                    padding: 10px;
+                    margin: 0;
                     overflow-x: auto;
                 }
                 .header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 20px;
-                    padding-bottom: 10px;
-                    border-bottom: 2px solid var(--vscode-panel-border);
+                    margin-bottom: 15px;
+                    padding-bottom: 8px;
+                    border-bottom: 1px solid var(--vscode-panel-border);
                 }
                 .controls {
                     display: flex;
-                    gap: 10px;
+                    gap: 8px;
                 }
                 .btn {
                     background: var(--vscode-button-background);
                     color: var(--vscode-button-foreground);
                     border: none;
-                    padding: 5px 15px;
+                    padding: 4px 10px;
                     cursor: pointer;
                     border-radius: 2px;
-                    font-size: 0.9em;
+                    font-size: 0.85em;
                 }
                 .btn:hover {
                     background: var(--vscode-button-hoverBackground);
                 }
                 #timeline {
                     position: relative;
-                    min-height: 400px;
-                    max-height: 80vh;
+                    min-height: 300px;
+                    max-height: 70vh;
                     overflow-y: auto;
                     overflow-x: auto;
                     background: var(--vscode-editor-background);
@@ -137,7 +106,7 @@ export class TimelinePanel {
                     top: 0;
                     left: 0;
                     right: 0;
-                    height: 30px;
+                    height: 25px;
                     border-bottom: 1px solid var(--vscode-panel-border);
                 }
                 .time-marker {
@@ -145,23 +114,23 @@ export class TimelinePanel {
                     top: 0;
                     bottom: 0;
                     border-left: 1px solid var(--vscode-descriptionForeground);
-                    font-size: 10px;
-                    padding-left: 5px;
+                    font-size: 9px;
+                    padding-left: 3px;
                     color: var(--vscode-descriptionForeground);
                 }
                 .timeline-events {
                     position: relative;
-                    margin-top: 40px;
+                    margin-top: 30px;
                 }
                 .event-bar {
                     position: absolute;
-                    height: 24px;
-                    border-radius: 3px;
+                    height: 22px;
+                    border-radius: 2px;
                     cursor: pointer;
                     display: flex;
                     align-items: center;
-                    padding: 0 8px;
-                    font-size: 11px;
+                    padding: 0 6px;
+                    font-size: 10px;
                     white-space: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
@@ -169,100 +138,33 @@ export class TimelinePanel {
                 }
                 .event-bar:hover {
                     opacity: 0.8;
-                    box-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
-                }
-                .event-instant {
-                    position: absolute;
-                    width: 3px;
-                    height: 24px;
-                    cursor: pointer;
-                }
-                .event-instant:hover {
-                    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+                    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
                 }
                 /* Event type colors */
                 .event-root { background: var(--vscode-charts-purple); }
                 .event-request { background: var(--vscode-charts-blue); }
                 .event-foreach { background: var(--vscode-charts-orange); }
                 .event-page { background: var(--vscode-charts-green); }
-                .event-context { background: var(--vscode-charts-yellow); }
-                .event-url { background: var(--vscode-charts-blue); }
-                .event-http { background: var(--vscode-charts-blue); }
-                .event-response { background: var(--vscode-charts-green); }
-                .event-transform { background: var(--vscode-charts-yellow); }
-                .event-merge { background: var(--vscode-charts-purple); }
-                .event-parallel { background: var(--vscode-charts-red); }
-                .event-item { background: var(--vscode-charts-orange); }
-                .event-pagination { background: var(--vscode-charts-yellow); }
-                .event-result { background: var(--vscode-charts-green); }
 
-                .legend {
-                    margin-top: 20px;
-                    display: flex;
-                    flex-wrap: wrap;
-                    gap: 15px;
-                    font-size: 11px;
-                }
-                .legend-item {
-                    display: flex;
-                    align-items: center;
-                    gap: 5px;
-                }
-                .legend-color {
-                    width: 16px;
-                    height: 16px;
-                    border-radius: 2px;
-                }
                 .empty-state {
                     text-align: center;
-                    padding: 60px 20px;
+                    padding: 40px 15px;
                     color: var(--vscode-descriptionForeground);
                 }
             </style>
         </head>
         <body>
             <div class="header">
-                <h3>Execution Timeline</h3>
+                <h4 style="margin: 0;">Timeline</h4>
                 <div class="controls">
-                    <button class="btn" onclick="zoomIn()">🔍 Zoom In</button>
-                    <button class="btn" onclick="zoomOut()">🔍 Zoom Out</button>
-                    <button class="btn" onclick="resetZoom()">↺ Reset</button>
+                    <button class="btn" onclick="zoomIn()">🔍+</button>
+                    <button class="btn" onclick="zoomOut()">🔍-</button>
+                    <button class="btn" onclick="resetZoom()">↺</button>
                 </div>
             </div>
 
             <div id="timeline">
                 ${globalEvents.length === 0 ? this.renderEmptyState() : this.renderTimeline()}
-            </div>
-
-            <div class="legend">
-                <div class="legend-item">
-                    <div class="legend-color event-root"></div>
-                    <span>Root</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color event-request"></div>
-                    <span>Request Step</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color event-foreach"></div>
-                    <span>ForEach Step</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color event-response"></div>
-                    <span>Response</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color event-transform"></div>
-                    <span>Transform</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color event-merge"></div>
-                    <span>Merge</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color event-parallel"></div>
-                    <span>Parallel</span>
-                </div>
             </div>
 
             <script nonce="${nonce}">
@@ -287,7 +189,7 @@ export class TimelinePanel {
                 }
 
                 function applyZoom() {
-                    const events = document.querySelectorAll('.event-bar, .event-instant');
+                    const events = document.querySelectorAll('.event-bar');
                     events.forEach(el => {
                         const left = parseFloat(el.dataset.left || '0');
                         const width = parseFloat(el.dataset.width || '0');
@@ -340,7 +242,7 @@ export class TimelinePanel {
         const startTime = Math.min(...stepGroups.map(s => s.startTime));
         const endTime = Math.max(...stepGroups.map(s => s.endTime));
         const totalDuration = endTime - startTime;
-        const pixelsPerMs = totalDuration > 0 ? 1000 / totalDuration : 1;
+        const pixelsPerMs = totalDuration > 0 ? 800 / totalDuration : 1;
 
         // Render time axis
         const numMarkers = 10;
@@ -354,8 +256,8 @@ export class TimelinePanel {
         timeAxisHtml += '</div>';
 
         // Render step groups
-        const rowHeight = 30;
-        const totalHeight = stepGroups.length * rowHeight + 50; // Add padding
+        const rowHeight = 26;
+        const totalHeight = stepGroups.length * rowHeight + 40;
         let eventsHtml = `<div class="timeline-events" style="min-height: ${totalHeight}px;">`;
         let rowIndex = 0;
 
@@ -479,27 +381,6 @@ export class TimelinePanel {
             case ProfileEventType.EVENT_REQUEST_PAGE_START:
             case ProfileEventType.EVENT_REQUEST_PAGE_END:
                 return 'event-page';
-            case ProfileEventType.EVENT_CONTEXT_SELECTION:
-                return 'event-context';
-            case ProfileEventType.EVENT_URL_COMPOSITION:
-                return 'event-url';
-            case ProfileEventType.EVENT_REQUEST_DETAILS:
-                return 'event-http';
-            case ProfileEventType.EVENT_REQUEST_RESPONSE:
-                return 'event-response';
-            case ProfileEventType.EVENT_RESPONSE_TRANSFORM:
-                return 'event-transform';
-            case ProfileEventType.EVENT_CONTEXT_MERGE:
-                return 'event-merge';
-            case ProfileEventType.EVENT_PARALLELISM_SETUP:
-                return 'event-parallel';
-            case ProfileEventType.EVENT_ITEM_SELECTION:
-                return 'event-item';
-            case ProfileEventType.EVENT_PAGINATION_EVAL:
-                return 'event-pagination';
-            case ProfileEventType.EVENT_RESULT:
-            case ProfileEventType.EVENT_STREAM_RESULT:
-                return 'event-result';
             default:
                 return 'event-request';
         }
