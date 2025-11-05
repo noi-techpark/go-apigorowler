@@ -25,8 +25,10 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage(message => {
+            console.log('[TimelineViewProvider] Received message:', message);
             switch (message.command) {
                 case 'selectEvent':
+                    console.log('[TimelineViewProvider] Executing selectStepFromTimeline with eventId:', message.eventId);
                     // Execute command to select step in tree and show details
                     vscode.commands.executeCommand('apigorowler.selectStepFromTimeline', message.eventId);
                     break;
@@ -227,11 +229,15 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                     document.querySelectorAll('.event-bar').forEach(bar => {
                         bar.addEventListener('click', function() {
                             const eventId = this.getAttribute('data-event-id');
+                            console.log('[Timeline] Clicked bar with eventId:', eventId);
                             if (eventId) {
+                                console.log('[Timeline] Sending selectEvent message with eventId:', eventId);
                                 vscode.postMessage({
                                     command: 'selectEvent',
                                     eventId: eventId
                                 });
+                            } else {
+                                console.error('[Timeline] No eventId found on clicked bar');
                             }
                         });
                     });

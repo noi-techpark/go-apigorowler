@@ -148,27 +148,54 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('apigorowler.selectStepFromTimeline', async (eventId: string) => {
-            if (stepsTreeProvider && stepsTreeView) {
-                const step = stepsTreeProvider.getStepById(eventId);
-                if (step) {
-                    // First focus the ApiGorowler activity bar to make the tree visible
-                    await vscode.commands.executeCommand('apigorowler.stepsExplorer.focus');
+            console.log('[selectStepFromTimeline] Received eventId:', eventId);
 
-                    // Reveal and select the step in the tree with maximum visibility
-                    await stepsTreeView.reveal(step, {
-                        select: true,
-                        focus: true,
-                        expand: true
-                    });
+            try {
+                if (stepsTreeProvider && stepsTreeView) {
+                    const step = stepsTreeProvider.getStepById(eventId);
+                    console.log('[selectStepFromTimeline] Found step:', step ? step.label : 'NOT FOUND');
+                    console.log('[selectStepFromTimeline] Step ID:', step?.id);
+                    console.log('[selectStepFromTimeline] Step data.id:', step?.data.id);
 
-                    // Small delay to ensure the reveal completes and selection is visible
-                    await new Promise(resolve => setTimeout(resolve, 150));
+                    if (step) {
+                        // First focus the ApiGorowler activity bar to make the tree visible
+                        console.log('[selectStepFromTimeline] Focusing steps explorer...');
+                        await vscode.commands.executeCommand('apigorowler.stepsExplorer.focus');
+                        console.log('[selectStepFromTimeline] Focus complete');
 
-                    // Trigger the same command that clicking the tree item would trigger
-                    await vscode.commands.executeCommand('apigorowler.toggleStepDetails', step);
+                        // Reveal and select the step in the tree with maximum visibility
+                        console.log('[selectStepFromTimeline] Revealing step in tree...');
+                        try {
+                            await stepsTreeView.reveal(step, {
+                                select: true,
+                                focus: true,
+                                expand: true
+                            });
+                            console.log('[selectStepFromTimeline] Reveal complete');
+                        } catch (revealError) {
+                            console.error('[selectStepFromTimeline] Reveal failed:', revealError);
+                            throw revealError;
+                        }
+
+                        // Small delay to ensure the reveal completes and selection is visible
+                        console.log('[selectStepFromTimeline] Waiting for UI update...');
+                        await new Promise(resolve => setTimeout(resolve, 150));
+
+                        // Trigger the same command that clicking the tree item would trigger
+                        console.log('[selectStepFromTimeline] Executing toggleStepDetails...');
+                        await vscode.commands.executeCommand('apigorowler.toggleStepDetails', step);
+                        console.log('[selectStepFromTimeline] Complete!');
+                    } else {
+                        vscode.window.showErrorMessage(`Step with ID ${eventId} not found in tree`);
+                        console.error(`[selectStepFromTimeline] Step with ID ${eventId} not found in tree`);
+                        console.error('[selectStepFromTimeline] Available step IDs:', Array.from(stepsTreeProvider['stepMap'].keys()));
+                    }
                 } else {
-                    console.error(`Step with ID ${eventId} not found in tree`);
+                    console.error('[selectStepFromTimeline] stepsTreeProvider or stepsTreeView not available');
                 }
+            } catch (error) {
+                console.error('[selectStepFromTimeline] Fatal error:', error);
+                vscode.window.showErrorMessage(`Failed to select step: ${error}`);
             }
         })
     );

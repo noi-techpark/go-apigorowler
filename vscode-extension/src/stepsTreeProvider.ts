@@ -258,6 +258,14 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
         return Promise.resolve(element.children);
     }
 
+    getParent(element: StepTreeItem): vscode.ProviderResult<StepTreeItem> {
+        // Required for reveal() to work - traverse up the tree hierarchy
+        if (element.data.parentId) {
+            return this.stepMap.get(element.data.parentId);
+        }
+        return null;
+    }
+
     addStep(profilerData: StepProfilerData): void {
         const eventType = profilerData.type;
 
