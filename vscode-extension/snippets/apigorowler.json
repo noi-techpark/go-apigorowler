@@ -1,0 +1,345 @@
+{
+  "Basic Configuration": {
+    "prefix": "agr-basic",
+    "body": [
+      "rootContext: []",
+      "steps:",
+      "  - type: request",
+      "    url: \"${1:https://api.example.com/endpoint}\"",
+      "    method: ${2|GET,POST,PUT,PATCH,DELETE|}",
+      "    resultTransformer: ${3:.data}",
+      "    $0"
+    ],
+    "description": "Basic ApiGorowler configuration with single request"
+  },
+  "Request Step": {
+    "prefix": "agr-request",
+    "body": [
+      "- type: request",
+      "  url: \"${1:https://api.example.com/endpoint}\"",
+      "  method: ${2|GET,POST,PUT,PATCH,DELETE|}",
+      "  ${3:resultTransformer: .data}",
+      "  $0"
+    ],
+    "description": "HTTP request step"
+  },
+  "Request with Headers": {
+    "prefix": "agr-request-headers",
+    "body": [
+      "- type: request",
+      "  url: \"${1:https://api.example.com/endpoint}\"",
+      "  method: ${2:GET}",
+      "  headers:",
+      "    ${3:Content-Type}: \"${4:application/json}\"",
+      "    ${5:Accept}: \"${6:application/json}\"",
+      "  resultTransformer: ${7:.data}",
+      "  $0"
+    ],
+    "description": "Request step with custom headers"
+  },
+  "Request with Query Params": {
+    "prefix": "agr-request-query",
+    "body": [
+      "- type: request",
+      "  url: \"${1:https://api.example.com/endpoint}\"",
+      "  method: ${2:GET}",
+      "  queryParams:",
+      "    ${3:param1}: \"${4:value1}\"",
+      "    ${5:param2}: \"${6:value2}\"",
+      "  resultTransformer: ${7:.data}",
+      "  $0"
+    ],
+    "description": "Request step with query parameters"
+  },
+  "POST Request with Body": {
+    "prefix": "agr-request-post",
+    "body": [
+      "- type: request",
+      "  url: \"${1:https://api.example.com/endpoint}\"",
+      "  method: POST",
+      "  headers:",
+      "    Content-Type: \"application/json\"",
+      "  bodyParams:",
+      "    ${2:key1}: \"${3:value1}\"",
+      "    ${4:key2}: ${5:value2}",
+      "  resultTransformer: ${6:.data}",
+      "  $0"
+    ],
+    "description": "POST request with JSON body"
+  },
+  "ForEach Step": {
+    "prefix": "agr-foreach",
+    "body": [
+      "- type: forEach",
+      "  path: ${1:.items}",
+      "  ${2:as: item}",
+      "  steps:",
+      "    - type: request",
+      "      url: \"${3:https://api.example.com/{{.id}}}\"",
+      "      method: GET",
+      "      $0"
+    ],
+    "description": "ForEach iteration step"
+  },
+  "ForEach with Parallel": {
+    "prefix": "agr-foreach-parallel",
+    "body": [
+      "- type: forEach",
+      "  path: ${1:.items}",
+      "  ${2:as: item}",
+      "  parallel: true",
+      "  maxConcurrency: ${3:10}",
+      "  rateLimit:",
+      "    requestsPerSecond: ${4:5.0}",
+      "    burst: ${5:2}",
+      "  steps:",
+      "    - type: request",
+      "      url: \"${6:https://api.example.com/{{.id}}}\"",
+      "      method: GET",
+      "      $0"
+    ],
+    "description": "Parallel forEach with rate limiting"
+  },
+  "ForEach with Noop Merge": {
+    "prefix": "agr-foreach-noop",
+    "body": [
+      "- type: forEach",
+      "  path: ${1:.items}",
+      "  ${2:as: item}",
+      "  noopMerge: true",
+      "  steps:",
+      "    - type: request",
+      "      url: \"${3:https://api.example.com/{{.id}}}\"",
+      "      method: GET",
+      "      mergeWithParentOn: ${4:.results += [\\$res]}",
+      "      $0"
+    ],
+    "description": "ForEach with noop merge (nested steps handle merging)"
+  },
+  "Nested ForEach": {
+    "prefix": "agr-foreach-nested",
+    "body": [
+      "- type: forEach",
+      "  path: ${1:.categories}",
+      "  as: ${2:category}",
+      "  steps:",
+      "    - type: request",
+      "      url: \"${3:https://api.example.com/categories/{{.id}}}\"",
+      "      method: GET",
+      "      resultTransformer: .items",
+      "      mergeOn: \". = \\$res\"",
+      "    - type: forEach",
+      "      path: .",
+      "      as: ${4:item}",
+      "      steps:",
+      "        - type: request",
+      "          url: \"${5:https://api.example.com/items/{{.id}}}\"",
+      "          method: GET",
+      "          $0"
+    ],
+    "description": "Nested forEach for multi-level iteration"
+  },
+  "Merge with Parent": {
+    "prefix": "agr-merge-parent",
+    "body": [
+      "mergeWithParentOn: ${1:.items += [\\$res]}",
+      "$0"
+    ],
+    "description": "Merge result with immediate parent context"
+  },
+  "Merge with Ancestor": {
+    "prefix": "agr-merge-on",
+    "body": [
+      "mergeOn: ${1:.items = \\$res}",
+      "$0"
+    ],
+    "description": "Merge result with ancestor context"
+  },
+  "Merge with Named Context": {
+    "prefix": "agr-merge-context",
+    "body": [
+      "mergeWithContext:",
+      "  name: ${1:contextName}",
+      "  rule: ${2:.details = \\$res}",
+      "$0"
+    ],
+    "description": "Merge result with named ancestor context"
+  },
+  "Pagination with Next URL": {
+    "prefix": "agr-paginator-url",
+    "body": [
+      "paginator:",
+      "  nextPageUrlSelector: ${1:.links.next}",
+      "  stopOn:",
+      "    type: responseBody",
+      "    selector: ${2:.links.next}",
+      "    operator: empty",
+      "$0"
+    ],
+    "description": "Pagination using next URL from response"
+  },
+  "Pagination with Offset/Limit": {
+    "prefix": "agr-paginator-offset",
+    "body": [
+      "paginator:",
+      "  params:",
+      "    - name: offset",
+      "      type: int",
+      "      initial: 0",
+      "      step: ${1:20}",
+      "    - name: limit",
+      "      type: int",
+      "      initial: ${1:20}",
+      "  stopOn:",
+      "    type: responseBody",
+      "    selector: ${2:.items | length}",
+      "    operator: ${3|==,<|}",
+      "    value: 0",
+      "$0"
+    ],
+    "description": "Pagination with offset and limit parameters"
+  },
+  "Pagination with Cursor": {
+    "prefix": "agr-paginator-cursor",
+    "body": [
+      "paginator:",
+      "  params:",
+      "    - name: cursor",
+      "      type: dynamic",
+      "      selector: ${1:.pagination.next_cursor}",
+      "  stopOn:",
+      "    type: responseBody",
+      "    selector: ${1:.pagination.next_cursor}",
+      "    operator: empty",
+      "$0"
+    ],
+    "description": "Cursor-based pagination"
+  },
+  "Pagination with Max Pages": {
+    "prefix": "agr-paginator-max",
+    "body": [
+      "paginator:",
+      "  params:",
+      "    - name: page",
+      "      type: int",
+      "      initial: 1",
+      "      step: 1",
+      "  stopOn:",
+      "    type: pageNum",
+      "    maxPages: ${1:10}",
+      "$0"
+    ],
+    "description": "Pagination with maximum page limit"
+  },
+  "OAuth2 Password Flow": {
+    "prefix": "agr-auth-oauth2-password",
+    "body": [
+      "auth:",
+      "  type: oauth2",
+      "  method: password",
+      "  tokenUrl: \"${1:https://auth.example.com/token}\"",
+      "  username: \"${2:username}\"",
+      "  password: \"${3:password}\"",
+      "  ${4:clientId: \"client_id\"}",
+      "  ${5:clientSecret: \"client_secret\"}",
+      "$0"
+    ],
+    "description": "OAuth2 password grant authentication"
+  },
+  "OAuth2 Client Credentials": {
+    "prefix": "agr-auth-oauth2-client",
+    "body": [
+      "auth:",
+      "  type: oauth2",
+      "  method: client_credentials",
+      "  tokenUrl: \"${1:https://auth.example.com/token}\"",
+      "  clientId: \"${2:client_id}\"",
+      "  clientSecret: \"${3:client_secret}\"",
+      "  ${4:scopes: [\"${5:read}\", \"${6:write}\"]}",
+      "$0"
+    ],
+    "description": "OAuth2 client credentials flow"
+  },
+  "Bearer Token Auth": {
+    "prefix": "agr-auth-bearer",
+    "body": [
+      "auth:",
+      "  type: bearer",
+      "  token: \"${1:your_bearer_token}\"",
+      "$0"
+    ],
+    "description": "Bearer token authentication"
+  },
+  "Basic Auth": {
+    "prefix": "agr-auth-basic",
+    "body": [
+      "auth:",
+      "  type: basic",
+      "  username: \"${1:username}\"",
+      "  password: \"${2:password}\"",
+      "$0"
+    ],
+    "description": "Basic authentication"
+  },
+  "Rate Limit Config": {
+    "prefix": "agr-ratelimit",
+    "body": [
+      "rateLimit:",
+      "  requestsPerSecond: ${1:5.0}",
+      "  burst: ${2:2}",
+      "$0"
+    ],
+    "description": "Rate limiting configuration"
+  },
+  "Stream Mode": {
+    "prefix": "agr-stream",
+    "body": [
+      "rootContext: []",
+      "stream: true",
+      "steps:",
+      "  $0"
+    ],
+    "description": "Enable streaming mode for incremental results"
+  },
+  "Complete Example": {
+    "prefix": "agr-complete",
+    "body": [
+      "rootContext: []",
+      "maxConcurrency: 10",
+      "headers:",
+      "  User-Agent: \"ApiGorowler/1.0\"",
+      "auth:",
+      "  type: ${1|bearer,oauth2,basic|}",
+      "  token: \"${2:your_token}\"",
+      "steps:",
+      "  - type: request",
+      "    name: \"${3:Fetch initial data}\"",
+      "    url: \"${4:https://api.example.com/items}\"",
+      "    method: GET",
+      "    resultTransformer: .items",
+      "    mergeOn: \". = \\$res\"",
+      "    paginator:",
+      "      nextPageUrlSelector: .links.next",
+      "      stopOn:",
+      "        type: responseBody",
+      "        selector: .links.next",
+      "        operator: empty",
+      "  - type: forEach",
+      "    path: .",
+      "    as: item",
+      "    parallel: true",
+      "    maxConcurrency: 5",
+      "    rateLimit:",
+      "      requestsPerSecond: 10.0",
+      "      burst: 2",
+      "    steps:",
+      "      - type: request",
+      "        name: \"${5:Fetch item details}\"",
+      "        url: \"${6:https://api.example.com/items/{{.id}}}\"",
+      "        method: GET",
+      "        resultTransformer: .data",
+      "        $0"
+    ],
+    "description": "Complete example with pagination, parallel execution, and rate limiting"
+  }
+}

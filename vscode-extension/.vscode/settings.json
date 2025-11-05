@@ -1,0 +1,12 @@
+{
+  "yaml.schemas": {
+    "../schemas/apigorowler-schema.json": [
+      "*.apigorowler.yaml",
+      "*.apigorowler.yml"
+    ]
+  },
+  "files.associations": {
+    "*.apigorowler.yaml": "yaml",
+    "*.apigorowler.yml": "yaml"
+  }
+}

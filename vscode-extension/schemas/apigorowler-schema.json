@@ -1,0 +1,327 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApiGorowler Configuration",
+  "description": "Declarative API crawler configuration",
+  "type": "object",
+  "properties": {
+    "rootContext": {
+      "description": "Initial context structure (array [] or object {})",
+      "oneOf": [
+        { "type": "array" },
+        { "type": "object" }
+      ]
+    },
+    "stream": {
+      "type": "boolean",
+      "description": "Enable streaming mode for root-level array contexts",
+      "default": false
+    },
+    "maxConcurrency": {
+      "type": "integer",
+      "description": "Global maximum concurrent workers for parallel forEach steps",
+      "minimum": 1,
+      "default": 10
+    },
+    "rateLimit": {
+      "$ref": "#/definitions/RateLimitConfig"
+    },
+    "auth": {
+      "$ref": "#/definitions/AuthenticatorConfig"
+    },
+    "headers": {
+      "type": "object",
+      "description": "Global HTTP headers applied to all requests",
+      "additionalProperties": { "type": "string" }
+    },
+    "steps": {
+      "type": "array",
+      "description": "Sequence of steps to execute",
+      "items": {
+        "$ref": "#/definitions/Step"
+      }
+    }
+  },
+  "required": ["rootContext", "steps"],
+  "definitions": {
+    "Step": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["request", "forEach"],
+          "description": "Step type: 'request' for API calls, 'forEach' for iteration"
+        },
+        "name": {
+          "type": "string",
+          "description": "Optional step name for debugging and profiling"
+        },
+        "as": {
+          "type": "string",
+          "description": "Context name for reference in merge rules"
+        },
+        "url": {
+          "type": "string",
+          "description": "API endpoint URL (supports Go templates with context data)"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"],
+          "description": "HTTP method",
+          "default": "GET"
+        },
+        "headers": {
+          "type": "object",
+          "description": "Request-specific headers",
+          "additionalProperties": { "type": "string" }
+        },
+        "queryParams": {
+          "type": "object",
+          "description": "URL query parameters",
+          "additionalProperties": { "type": "string" }
+        },
+        "bodyParams": {
+          "type": "object",
+          "description": "Request body parameters (JSON encoded)"
+        },
+        "auth": {
+          "$ref": "#/definitions/AuthenticatorConfig"
+        },
+        "resultTransformer": {
+          "type": "string",
+          "description": "jq expression to transform API response before merging"
+        },
+        "paginator": {
+          "$ref": "#/definitions/Paginator"
+        },
+        "path": {
+          "type": "string",
+          "description": "jq path to extract items for forEach iteration"
+        },
+        "value": {
+          "description": "Static value or expression to iterate over in forEach"
+        },
+        "parallel": {
+          "type": "boolean",
+          "description": "Enable parallel execution of forEach iterations",
+          "default": false
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "description": "Step-specific max concurrent workers (overrides global)",
+          "minimum": 1
+        },
+        "rateLimit": {
+          "$ref": "#/definitions/RateLimitConfig"
+        },
+        "mergeOn": {
+          "type": "string",
+          "description": "jq expression to merge result with ancestor context (e.g., '.items = $res')"
+        },
+        "mergeWithParentOn": {
+          "type": "string",
+          "description": "jq expression to merge result with immediate parent context"
+        },
+        "mergeWithContext": {
+          "$ref": "#/definitions/MergeWithContext"
+        },
+        "noopMerge": {
+          "type": "boolean",
+          "description": "Skip merging - useful when nested steps handle merging",
+          "default": false
+        },
+        "steps": {
+          "type": "array",
+          "description": "Nested steps (for forEach)",
+          "items": {
+            "$ref": "#/definitions/Step"
+          }
+        }
+      },
+      "required": ["type"],
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "request" } }
+          },
+          "then": {
+            "required": ["url"]
+          }
+        },
+        {
+          "if": {
+            "properties": { "type": { "const": "forEach" } }
+          },
+          "then": {
+            "oneOf": [
+              { "required": ["path"] },
+              { "required": ["value"] }
+            ]
+          }
+        }
+      ]
+    },
+    "AuthenticatorConfig": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["oauth2", "bearer", "basic"],
+          "description": "Authentication type"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["password", "client_credentials"],
+          "description": "OAuth2 grant type"
+        },
+        "tokenUrl": {
+          "type": "string",
+          "description": "OAuth2 token endpoint URL"
+        },
+        "username": {
+          "type": "string",
+          "description": "Username for OAuth2 password flow or Basic auth"
+        },
+        "password": {
+          "type": "string",
+          "description": "Password for OAuth2 password flow or Basic auth"
+        },
+        "clientId": {
+          "type": "string",
+          "description": "OAuth2 client ID"
+        },
+        "clientSecret": {
+          "type": "string",
+          "description": "OAuth2 client secret"
+        },
+        "token": {
+          "type": "string",
+          "description": "Bearer token"
+        },
+        "scopes": {
+          "type": "array",
+          "description": "OAuth2 scopes",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["type"]
+    },
+    "Paginator": {
+      "type": "object",
+      "properties": {
+        "nextPageUrlSelector": {
+          "type": "string",
+          "description": "jq expression to extract next page URL from response"
+        },
+        "params": {
+          "type": "array",
+          "description": "Pagination parameters (offset, limit, cursor, etc.)",
+          "items": {
+            "$ref": "#/definitions/PaginatorParam"
+          }
+        },
+        "stopOn": {
+          "$ref": "#/definitions/StopCondition"
+        }
+      }
+    },
+    "PaginatorParam": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Parameter name in query string"
+        },
+        "in": {
+          "type": "string",
+          "enum": ["query", "body"],
+          "description": "Where to place the parameter",
+          "default": "query"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["int", "float", "datetime", "dynamic"],
+          "description": "Parameter type"
+        },
+        "initial": {
+          "description": "Initial value (number, string, or datetime format)"
+        },
+        "step": {
+          "type": "number",
+          "description": "Increment value for int/float types"
+        },
+        "format": {
+          "type": "string",
+          "description": "Datetime format string (Go time format)"
+        },
+        "selector": {
+          "type": "string",
+          "description": "jq expression to extract dynamic value from response"
+        }
+      },
+      "required": ["name", "type"]
+    },
+    "StopCondition": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["responseBody", "requestParam", "pageNum"],
+          "description": "Stop condition type"
+        },
+        "selector": {
+          "type": "string",
+          "description": "jq expression to evaluate stop condition"
+        },
+        "operator": {
+          "type": "string",
+          "enum": ["==", "!=", "<", "<=", ">", ">=", "empty", "notEmpty"],
+          "description": "Comparison operator"
+        },
+        "value": {
+          "description": "Value to compare against"
+        },
+        "paramName": {
+          "type": "string",
+          "description": "Parameter name for requestParam type"
+        },
+        "maxPages": {
+          "type": "integer",
+          "description": "Maximum number of pages for pageNum type",
+          "minimum": 1
+        }
+      },
+      "required": ["type"]
+    },
+    "MergeWithContext": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Named context to merge with (from 'as' field)"
+        },
+        "rule": {
+          "type": "string",
+          "description": "jq expression for merging (e.g., '.details = $res')"
+        }
+      },
+      "required": ["name", "rule"]
+    },
+    "RateLimitConfig": {
+      "type": "object",
+      "properties": {
+        "requestsPerSecond": {
+          "type": "number",
+          "description": "Maximum requests per second",
+          "minimum": 0.1
+        },
+        "burst": {
+          "type": "integer",
+          "description": "Burst size for rate limiter",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "required": ["requestsPerSecond"]
+    }
+  }
+}

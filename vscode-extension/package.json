@@ -1,0 +1,227 @@
+{
+  "name": "apigorowler-vscode",
+  "displayName": "ApiGorowler",
+  "description": "Development and debugging tool for ApiGorowler YAML configurations",
+  "version": "0.1.0",
+  "publisher": "noi-techpark",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Testing"
+  ],
+  "keywords": [
+    "api",
+    "crawler",
+    "yaml",
+    "debugging",
+    "testing"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml",
+    "workspaceContains:**/*.apigorowler.yaml",
+    "onCommand:apigorowler.run",
+    "onView:apigorowler.stepsExplorer"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "apigorowler.run",
+        "title": "Run ApiGorowler Configuration",
+        "icon": "$(play)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.stop",
+        "title": "Stop Execution",
+        "icon": "$(debug-stop)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.debug",
+        "title": "Debug Configuration",
+        "icon": "$(debug-alt)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.validateConfig",
+        "title": "Validate Configuration",
+        "icon": "$(check)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.exportSteps",
+        "title": "Export Execution Steps",
+        "icon": "$(export)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.collapseAllSteps",
+        "title": "Collapse All Steps",
+        "icon": "$(collapse-all)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.refreshSteps",
+        "title": "Refresh",
+        "icon": "$(refresh)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.showStepDetails",
+        "title": "Show Step Details",
+        "icon": "$(info)",
+        "category": "ApiGorowler"
+      },
+      {
+        "command": "apigorowler.convertToApiGorowlerYaml",
+        "title": "Convert to ApiGorowler YAML",
+        "category": "ApiGorowler"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.apigorowler\\.ya?ml$/",
+          "command": "apigorowler.run",
+          "group": "navigation@1"
+        },
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.apigorowler\\.ya?ml$/",
+          "command": "apigorowler.stop",
+          "group": "navigation@2"
+        },
+        {
+          "when": "resourceLangId == yaml && resourcePath =~ /\\.apigorowler\\.ya?ml$/",
+          "command": "apigorowler.validateConfig",
+          "group": "navigation@3"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "apigorowler.refreshSteps",
+          "when": "view == apigorowler.stepsExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "apigorowler.collapseAllSteps",
+          "when": "view == apigorowler.stepsExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "apigorowler.exportSteps",
+          "when": "view == apigorowler.stepsExplorer",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "apigorowler.showStepDetails",
+          "when": "view == apigorowler.stepsExplorer",
+          "group": "inline"
+        }
+      ]
+    },
+    "views": {
+      "apigorowler": [
+        {
+          "id": "apigorowler.stepsExplorer",
+          "name": "Execution Steps",
+          "icon": "$(list-tree)",
+          "contextualTitle": "ApiGorowler Steps"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "apigorowler",
+          "title": "ApiGorowler",
+          "icon": "$(globe)"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ApiGorowler",
+      "properties": {
+        "apigorowler.executable.path": {
+          "type": "string",
+          "default": "go",
+          "description": "Path to Go executable for running the crawler"
+        },
+        "apigorowler.autoValidate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically validate configuration on save"
+        },
+        "apigorowler.autoRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run crawler when configuration changes"
+        },
+        "apigorowler.maxOutputSize": {
+          "type": "number",
+          "default": 10000,
+          "description": "Maximum number of lines to display in output (0 = unlimited)"
+        },
+        "apigorowler.collapseSteps": {
+          "type": "boolean",
+          "default": false,
+          "description": "Collapse all steps by default"
+        }
+      }
+    },
+    "yamlValidation": [
+      {
+        "fileMatch": [
+          "*.apigorowler.yaml",
+          "*.apigorowler.yml"
+        ],
+        "url": "./schemas/apigorowler-schema.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "yaml",
+        "path": "./snippets/apigorowler.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile && npm run build:binary:all",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build:binary": "node scripts/build-all-platforms.js",
+    "build:binary:all": "node scripts/build-all-platforms.js",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "npm run build:binary:all && vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^18.x",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/test-electron": "^2.3.0",
+    "@vscode/vsce": "^2.19.0",
+    "eslint": "^8.40.0",
+    "typescript": "^5.1.0"
+  },
+  "dependencies": {
+    "diff": "^8.0.2",
+    "yaml": "^2.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/noi-techpark/go-apigorowler"
+  },
+  "license": "AGPL-3.0-or-later",
+  "icon": "icon.png",
+  "extensionDependencies": [
+    "redhat.vscode-yaml"
+  ]
+}
