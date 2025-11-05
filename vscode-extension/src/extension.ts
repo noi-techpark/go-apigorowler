@@ -17,12 +17,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Initialize tree provider
     stepsTreeProvider = new StepsTreeProvider();
-    const treeView = vscode.window.createTreeView('apigorowler.stepsExplorer', {
+    const stepsTreeView = vscode.window.createTreeView('apigorowler.stepsExplorer', {
         treeDataProvider: stepsTreeProvider,
         showCollapseAll: true
     });
 
-    context.subscriptions.push(treeView);
+    context.subscriptions.push(stepsTreeView);
 
     // Register timeline webview view provider BEFORE crawler runner
     timelineViewProvider = new TimelineViewProvider(context.extensionUri);
@@ -142,6 +142,33 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('apigorowler.toggleStepDetails', (step: StepTreeItem) => {
             if (step && step.data) {
                 StepDetailsPanel.createOrShow(context.extensionUri, step.data);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('apigorowler.selectStepFromTimeline', async (eventId: string) => {
+            if (stepsTreeProvider && stepsTreeView) {
+                const step = stepsTreeProvider.getStepById(eventId);
+                if (step) {
+                    // First focus the ApiGorowler activity bar to make the tree visible
+                    await vscode.commands.executeCommand('apigorowler.stepsExplorer.focus');
+
+                    // Reveal and select the step in the tree with maximum visibility
+                    await stepsTreeView.reveal(step, {
+                        select: true,
+                        focus: true,
+                        expand: true
+                    });
+
+                    // Small delay to ensure the reveal completes and selection is visible
+                    await new Promise(resolve => setTimeout(resolve, 150));
+
+                    // Trigger the same command that clicking the tree item would trigger
+                    await vscode.commands.executeCommand('apigorowler.toggleStepDetails', step);
+                } else {
+                    console.error(`Step with ID ${eventId} not found in tree`);
+                }
             }
         })
     );

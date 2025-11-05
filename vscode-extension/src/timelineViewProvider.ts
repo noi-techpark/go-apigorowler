@@ -27,7 +27,8 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(message => {
             switch (message.command) {
                 case 'selectEvent':
-                    vscode.commands.executeCommand('apigorowler.showStepDetails', message.event);
+                    // Execute command to select step in tree and show details
+                    vscode.commands.executeCommand('apigorowler.selectStepFromTimeline', message.eventId);
                     break;
             }
         });
@@ -135,16 +136,18 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                     overflow: hidden;
                     text-overflow: ellipsis;
                     transition: opacity 0.2s;
+                    color: #000000;
+                    font-weight: 500;
                 }
                 .event-bar:hover {
                     opacity: 0.8;
                     box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
                 }
-                /* Event type colors */
-                .event-root { background: var(--vscode-charts-purple); }
-                .event-request { background: var(--vscode-charts-blue); }
-                .event-foreach { background: var(--vscode-charts-orange); }
-                .event-page { background: var(--vscode-charts-green); }
+                /* Event type colors - using darker shades for better contrast */
+                .event-root { background: #9370DB; }      /* Medium Purple */
+                .event-request { background: #4A90E2; }   /* Blue */
+                .event-foreach { background: #FFA500; }   /* Orange */
+                .event-page { background: #32CD32; }      /* Lime Green */
 
                 .empty-state {
                     text-align: center;
@@ -157,9 +160,9 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
             <div class="header">
                 <h4 style="margin: 0;">Timeline</h4>
                 <div class="controls">
-                    <button class="btn" onclick="zoomIn()">🔍+</button>
-                    <button class="btn" onclick="zoomOut()">🔍-</button>
-                    <button class="btn" onclick="resetZoom()">↺</button>
+                    <button class="btn btn-zoom-in">🔍+</button>
+                    <button class="btn btn-zoom-out">🔍-</button>
+                    <button class="btn btn-zoom-reset">↺</button>
                 </div>
             </div>
 
@@ -172,21 +175,6 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                 let zoomLevel = 1;
 
                 ${this.renderTimelineScript()}
-
-                function zoomIn() {
-                    zoomLevel = Math.min(zoomLevel * 1.5, 10);
-                    applyZoom();
-                }
-
-                function zoomOut() {
-                    zoomLevel = Math.max(zoomLevel / 1.5, 0.1);
-                    applyZoom();
-                }
-
-                function resetZoom() {
-                    zoomLevel = 1;
-                    applyZoom();
-                }
 
                 function applyZoom() {
                     const events = document.querySelectorAll('.event-bar');
@@ -206,12 +194,48 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                     });
                 }
 
-                function selectEvent(eventId) {
-                    vscode.postMessage({
-                        command: 'selectEvent',
-                        eventId: eventId
+                // Setup event listeners when DOM is ready
+                document.addEventListener('DOMContentLoaded', function() {
+                    // Zoom in button
+                    const zoomInBtn = document.querySelector('.btn-zoom-in');
+                    if (zoomInBtn) {
+                        zoomInBtn.addEventListener('click', function() {
+                            zoomLevel = Math.min(zoomLevel * 1.5, 10);
+                            applyZoom();
+                        });
+                    }
+
+                    // Zoom out button
+                    const zoomOutBtn = document.querySelector('.btn-zoom-out');
+                    if (zoomOutBtn) {
+                        zoomOutBtn.addEventListener('click', function() {
+                            zoomLevel = Math.max(zoomLevel / 1.5, 0.1);
+                            applyZoom();
+                        });
+                    }
+
+                    // Reset zoom button
+                    const resetBtn = document.querySelector('.btn-zoom-reset');
+                    if (resetBtn) {
+                        resetBtn.addEventListener('click', function() {
+                            zoomLevel = 1;
+                            applyZoom();
+                        });
+                    }
+
+                    // Event bars click handlers
+                    document.querySelectorAll('.event-bar').forEach(bar => {
+                        bar.addEventListener('click', function() {
+                            const eventId = this.getAttribute('data-event-id');
+                            if (eventId) {
+                                vscode.postMessage({
+                                    command: 'selectEvent',
+                                    eventId: eventId
+                                });
+                            }
+                        });
                     });
-                }
+                });
             </script>
         </body>
         </html>`;
@@ -274,8 +298,8 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                 <div class="event-bar ${eventClass}"
                      data-left="${left}"
                      data-width="${width}"
+                     data-event-id="${group.id}"
                      style="left: ${left}px; top: ${top}px; width: ${Math.max(width, 2)}px"
-                     onclick="selectEvent('${group.id}')"
                      title="${label} (${eventDuration.toFixed(2)}ms)">
                     ${escapeHtml(label)} ${eventDuration.toFixed(0)}ms
                     ${group.workerId !== undefined ? ` [W${group.workerId}]` : ''}

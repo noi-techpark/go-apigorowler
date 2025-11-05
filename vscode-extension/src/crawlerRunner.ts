@@ -43,7 +43,7 @@ export class CrawlerRunner {
                 location: vscode.ProgressLocation.Notification,
                 title: 'Running ApiGorowler',
                 cancellable: true
-            }, async (progress, token) => {
+            }, async (_progress, token) => {
                 token.onCancellationRequested(() => {
                     this.stop();
                 });
@@ -136,11 +136,19 @@ export class CrawlerRunner {
                             this.outputChannel.appendLine('---');
                             this.outputChannel.appendLine('Execution completed successfully');
                             vscode.window.showInformationMessage('ApiGorowler execution completed');
+
+                            // Focus timeline at the end
+                            vscode.commands.executeCommand('apigorowler.timeline.focus');
+
                             resolve();
                         } else {
                             this.outputChannel.appendLine('---');
                             this.outputChannel.appendLine(`Execution failed with code ${code}`);
                             vscode.window.showErrorMessage(`ApiGorowler execution failed with code ${code}`);
+
+                            // Focus timeline even on failure
+                            vscode.commands.executeCommand('apigorowler.timeline.focus');
+
                             reject(new Error(`Process exited with code ${code}`));
                         }
 
@@ -224,6 +232,9 @@ export class CrawlerRunner {
             this.currentProcess.kill();
             this.currentProcess = undefined;
             this.outputChannel.appendLine('Execution stopped by user');
+
+            // Focus timeline when stopped
+            vscode.commands.executeCommand('apigorowler.timeline.focus');
         }
     }
 

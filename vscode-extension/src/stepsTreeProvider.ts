@@ -398,6 +398,10 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
         return this.rootSteps;
     }
 
+    getStepById(id: string): StepTreeItem | undefined {
+        return this.stepMap.get(id);
+    }
+
     private getUpdatedTooltip(item: StepTreeItem): string {
         const parts: string[] = [];
         const data = item.data;
