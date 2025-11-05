@@ -278,8 +278,11 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
                 startItem.data.duration = profilerData.duration;
                 startItem.description = `${profilerData.duration}ms`;
 
-                // Fire change event for this specific item to update the tree
-                this._onDidChangeTreeData.fire(startItem);
+                // Update tooltip to include duration
+                startItem.tooltip = this.getUpdatedTooltip(startItem);
+
+                // Fire change event for the entire tree to ensure update is visible
+                this._onDidChangeTreeData.fire(undefined);
             }
             return; // Don't create a separate tree item for END events
         }
@@ -392,5 +395,70 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
 
     getSteps(): StepTreeItem[] {
         return this.rootSteps;
+    }
+
+    private getUpdatedTooltip(item: StepTreeItem): string {
+        const parts: string[] = [];
+        const data = item.data;
+
+        // Event type name
+        const eventNames: Record<number, string> = {
+            [ProfileEventType.EVENT_ROOT_START]: 'Root Start',
+            [ProfileEventType.EVENT_REQUEST_STEP_START]: 'Request Step',
+            [ProfileEventType.EVENT_REQUEST_STEP_END]: 'Request Step End',
+            [ProfileEventType.EVENT_CONTEXT_SELECTION]: 'Context Selection',
+            [ProfileEventType.EVENT_REQUEST_PAGE_START]: 'Request Page',
+            [ProfileEventType.EVENT_REQUEST_PAGE_END]: 'Request Page End',
+            [ProfileEventType.EVENT_PAGINATION_EVAL]: 'Pagination Evaluation',
+            [ProfileEventType.EVENT_URL_COMPOSITION]: 'URL Composition',
+            [ProfileEventType.EVENT_REQUEST_DETAILS]: 'Request Details',
+            [ProfileEventType.EVENT_REQUEST_RESPONSE]: 'Response',
+            [ProfileEventType.EVENT_RESPONSE_TRANSFORM]: 'Transform',
+            [ProfileEventType.EVENT_CONTEXT_MERGE]: 'Context Merge',
+            [ProfileEventType.EVENT_FOREACH_STEP_START]: 'ForEach Step',
+            [ProfileEventType.EVENT_FOREACH_STEP_END]: 'ForEach Step End',
+            [ProfileEventType.EVENT_PARALLELISM_SETUP]: 'Parallelism Setup',
+            [ProfileEventType.EVENT_ITEM_SELECTION]: 'Item Selection',
+            [ProfileEventType.EVENT_RESULT]: 'Final Result',
+            [ProfileEventType.EVENT_STREAM_RESULT]: 'Stream Result'
+        };
+
+        parts.push(`Event: ${eventNames[data.type] || `Unknown Event (${data.type})`}`);
+
+        if (data.name) {
+            parts.push(`Name: ${data.name}`);
+        }
+
+        if (data.timestamp) {
+            parts.push(`Time: ${data.timestamp}`);
+        }
+
+        if (data.duration !== undefined) {
+            parts.push(`Duration: ${data.duration}ms`);
+        }
+
+        if (data.workerId !== undefined) {
+            parts.push(`Worker: ${data.workerId}`);
+        }
+
+        if (data.workerPool) {
+            parts.push(`Pool: ${data.workerPool}`);
+        }
+
+        // Add specific data hints based on event type
+        const eventData = data.data;
+        if (eventData) {
+            if (eventData.statusCode) {
+                parts.push(`Status: ${eventData.statusCode}`);
+            }
+            if (eventData.url || eventData.resultUrl) {
+                parts.push(`URL: ${eventData.url || eventData.resultUrl}`);
+            }
+            if (eventData.maxConcurrency) {
+                parts.push(`Concurrency: ${eventData.maxConcurrency}`);
+            }
+        }
+
+        return parts.join('\n');
     }
 }

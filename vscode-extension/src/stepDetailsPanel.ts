@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { StepProfilerData, ProfileEventType } from './stepsTreeProvider';
+import * as Diff from 'diff';
 
 export class StepDetailsPanel {
     private static currentPanel: StepDetailsPanel | undefined;
@@ -275,6 +276,24 @@ export class StepDetailsPanel {
                         });
                     });
 
+                    // Setup copy active view buttons (for transform/merge comparisons)
+                    document.querySelectorAll('.btn-copy-active').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const sectionId = this.getAttribute('data-section');
+                            const section = document.getElementById(sectionId);
+                            if (section) {
+                                const activeView = section.querySelector('.comparison-view[style*="display: block"]');
+                                if (activeView) {
+                                    const text = activeView.textContent;
+                                    vscode.postMessage({
+                                        command: 'copy',
+                                        text: text
+                                    });
+                                }
+                            }
+                        });
+                    });
+
                     // Setup view switcher buttons
                     document.querySelectorAll('.btn-view').forEach(button => {
                         button.addEventListener('click', function() {
@@ -313,6 +332,28 @@ export class StepDetailsPanel {
                                     content: content,
                                     title: title
                                 });
+                            }
+                        });
+                    });
+
+                    // Setup open active view in tab buttons (for transform/merge comparisons)
+                    document.querySelectorAll('.btn-open-active').forEach(button => {
+                        button.addEventListener('click', function() {
+                            const sectionId = this.getAttribute('data-section');
+                            const section = document.getElementById(sectionId);
+                            if (section) {
+                                const activeView = section.querySelector('.comparison-view[style*="display: block"]');
+                                if (activeView) {
+                                    // Determine title based on which view is active
+                                    const activeButton = section.querySelector('.btn-view.active');
+                                    const viewName = activeButton ? activeButton.textContent : 'Comparison';
+                                    const content = activeView.textContent;
+                                    vscode.postMessage({
+                                        command: 'openInTab',
+                                        content: content,
+                                        title: viewName
+                                    });
+                                }
                             }
                         });
                     });
@@ -723,6 +764,10 @@ export class StepDetailsPanel {
         const before = JSON.stringify(data.data?.beforeResponse || {}, null, 2);
         const after = JSON.stringify(data.data?.afterResponse || {}, null, 2);
         const diff = this.computeDiff(before, after);
+        const sectionId = `transform-section-${data.id}`;
+        const beforeId = `before-transform-${data.id}`;
+        const afterId = `after-transform-${data.id}`;
+        const diffId = `diff-transform-${data.id}`;
 
         return `
             <div class="header">
@@ -735,23 +780,29 @@ export class StepDetailsPanel {
                 <div class="code-block">${escapeHtml(transformRule)}</div>
             </div>
 
-            <div class="section">
-                <div class="section-title">Comparison</div>
+            <div class="section" id="${sectionId}">
                 <div class="section-header">
-                    <button class="btn btn-view active" data-view="before-transform">Before</button>
-                    <button class="btn btn-view" data-view="after-transform">After</button>
-                    <button class="btn btn-view" data-view="diff-transform">Diff</button>
+                    <div class="section-title">Comparison</div>
+                    <div class="actions">
+                        <button class="btn btn-copy-active" data-section="${sectionId}">📋 Copy</button>
+                        <button class="btn btn-open-active" data-section="${sectionId}">📄 Open in Tab</button>
+                    </div>
+                </div>
+                <div class="section-header">
+                    <button class="btn btn-view active" data-view="${beforeId}">Before</button>
+                    <button class="btn btn-view" data-view="${afterId}">After</button>
+                    <button class="btn btn-view" data-view="${diffId}">Diff</button>
                 </div>
 
-                <div id="before-transform" class="comparison-view" style="display: block;">
+                <div id="${beforeId}" class="comparison-view" style="display: block;">
                     <div class="code-block">${escapeHtml(before)}</div>
                 </div>
 
-                <div id="after-transform" class="comparison-view" style="display: none;">
+                <div id="${afterId}" class="comparison-view" style="display: none;">
                     <div class="code-block">${escapeHtml(after)}</div>
                 </div>
 
-                <div id="diff-transform" class="comparison-view" style="display: none;">
+                <div id="${diffId}" class="comparison-view" style="display: none;">
                     <div class="diff-container">${diff}</div>
                 </div>
             </div>
@@ -766,6 +817,10 @@ export class StepDetailsPanel {
         const after = JSON.stringify(data.data?.targetContextAfter || {}, null, 2);
         const fullContextMap = JSON.stringify(data.data?.fullContextMap || {}, null, 2);
         const diff = this.computeDiff(before, after);
+        const sectionId = `merge-section-${data.id}`;
+        const beforeId = `before-merge-${data.id}`;
+        const afterId = `after-merge-${data.id}`;
+        const diffId = `diff-merge-${data.id}`;
 
         return `
             <div class="header">
@@ -784,23 +839,29 @@ export class StepDetailsPanel {
                 <div class="code-block">${escapeHtml(mergeRule)}</div>
             </div>
 
-            <div class="section">
-                <div class="section-title">Target Context Comparison</div>
+            <div class="section" id="${sectionId}">
                 <div class="section-header">
-                    <button class="btn btn-view active" data-view="before-merge">Before</button>
-                    <button class="btn btn-view" data-view="after-merge">After</button>
-                    <button class="btn btn-view" data-view="diff-merge">Diff</button>
+                    <div class="section-title">Target Context Comparison</div>
+                    <div class="actions">
+                        <button class="btn btn-copy-active" data-section="${sectionId}">📋 Copy</button>
+                        <button class="btn btn-open-active" data-section="${sectionId}">📄 Open in Tab</button>
+                    </div>
+                </div>
+                <div class="section-header">
+                    <button class="btn btn-view active" data-view="${beforeId}">Before</button>
+                    <button class="btn btn-view" data-view="${afterId}">After</button>
+                    <button class="btn btn-view" data-view="${diffId}">Diff</button>
                 </div>
 
-                <div id="before-merge" class="comparison-view" style="display: block;">
+                <div id="${beforeId}" class="comparison-view" style="display: block;">
                     <div class="code-block">${escapeHtml(before)}</div>
                 </div>
 
-                <div id="after-merge" class="comparison-view" style="display: none;">
+                <div id="${afterId}" class="comparison-view" style="display: none;">
                     <div class="code-block">${escapeHtml(after)}</div>
                 </div>
 
-                <div id="diff-merge" class="comparison-view" style="display: none;">
+                <div id="${diffId}" class="comparison-view" style="display: none;">
                     <div class="diff-container">${diff}</div>
                 </div>
             </div>
@@ -949,31 +1010,36 @@ export class StepDetailsPanel {
     }
 
     private computeDiff(before: string, after: string): string {
-        const beforeLines = before.split('\n');
-        const afterLines = after.split('\n');
+        // Use jsdiff for word-level diff
+        const changes = Diff.diffWords(before, after);
 
         let html = '<div class="diff-view">';
 
-        // Simple line-by-line diff
-        const maxLines = Math.max(beforeLines.length, afterLines.length);
-
-        for (let i = 0; i < maxLines; i++) {
-            const beforeLine = i < beforeLines.length ? beforeLines[i] : '';
-            const afterLine = i < afterLines.length ? afterLines[i] : '';
-
-            if (beforeLine === afterLine) {
-                // Unchanged line
-                html += `<div class="diff-line diff-unchanged">${escapeHtml(beforeLine)}</div>`;
-            } else if (beforeLine && !afterLine) {
-                // Removed line
-                html += `<div class="diff-line diff-removed">- ${escapeHtml(beforeLine)}</div>`;
-            } else if (!beforeLine && afterLine) {
-                // Added line
-                html += `<div class="diff-line diff-added">+ ${escapeHtml(afterLine)}</div>`;
+        for (const change of changes) {
+            if (change.added) {
+                // Split into lines and add each line with + prefix
+                const lines = change.value.split('\n');
+                for (const line of lines) {
+                    if (line) {  // Skip empty lines at the end
+                        html += `<div class="diff-line diff-added">+ ${escapeHtml(line)}</div>`;
+                    }
+                }
+            } else if (change.removed) {
+                // Split into lines and add each line with - prefix
+                const lines = change.value.split('\n');
+                for (const line of lines) {
+                    if (line) {  // Skip empty lines at the end
+                        html += `<div class="diff-line diff-removed">- ${escapeHtml(line)}</div>`;
+                    }
+                }
             } else {
-                // Modified line - show both
-                html += `<div class="diff-line diff-removed">- ${escapeHtml(beforeLine)}</div>`;
-                html += `<div class="diff-line diff-added">+ ${escapeHtml(afterLine)}</div>`;
+                // Unchanged - split into lines
+                const lines = change.value.split('\n');
+                for (const line of lines) {
+                    if (line || lines.length === 1) {  // Show empty lines in the middle
+                        html += `<div class="diff-line diff-unchanged">  ${escapeHtml(line)}</div>`;
+                    }
+                }
             }
         }
 

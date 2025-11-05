@@ -25,11 +25,9 @@ export class CrawlerRunner {
         this.outputChannel.clear();
         this.outputChannel.show(true);
 
-        // Clear timeline if it's open
-        const timeline = TimelinePanel.getInstance();
-        if (timeline) {
-            timeline.clear();
-        }
+        // Open timeline panel and clear it
+        const timeline = TimelinePanel.createOrShow(this.context.extensionUri);
+        timeline.clear();
 
         const config = vscode.workspace.getConfiguration('apigorowler');
         const goPath = config.get<string>('executable.path') || 'go';
