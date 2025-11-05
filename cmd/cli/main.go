@@ -1,0 +1,124 @@
+// SPDX-FileCopyrightText: 2024 NOI Techpark <digital@noi.bz.it>
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log"
+	"os"
+
+	"github.com/noi-techpark/go-apigorowler"
+)
+
+func main() {
+	configPath := flag.String("config", "", "Path to YAML configuration file")
+	profilerFlag := flag.Bool("profiler", false, "Enable profiler output (JSON per step)")
+	validateFlag := flag.Bool("validate", false, "Only validate configuration without running")
+	flag.Parse()
+
+	if *configPath == "" {
+		fmt.Fprintln(os.Stderr, "Error: -config flag is required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Create crawler (this also validates)
+	crawler, validationErrs, err := apigorowler.NewApiCrawler(*configPath)
+
+	// Check validation errors first (these have detailed messages)
+	if len(validationErrs) > 0 {
+		fmt.Fprintln(os.Stderr, "Configuration validation failed:")
+		for _, e := range validationErrs {
+			fmt.Fprintf(os.Stderr, "  - %s: %s\n", e.Location, e.Message)
+		}
+		os.Exit(1)
+	}
+
+	// Then check for other errors (file not found, parse errors, etc.)
+	if err != nil {
+		log.Fatalf("Failed to create crawler: %v", err)
+	}
+
+	if *validateFlag {
+		fmt.Println("Configuration is valid")
+		return
+	}
+
+	// Enable profiler if requested
+	var profilerChan chan apigorowler.StepProfilerData
+	if *profilerFlag {
+		profilerChan = crawler.EnableProfiler()
+		defer close(profilerChan)
+
+		// Output profiler data as JSON
+		go func() {
+			for data := range profilerChan {
+				jsonData, err := json.Marshal(data)
+				if err != nil {
+					log.Printf("Failed to marshal profiler data: %v", err)
+					continue
+				}
+				fmt.Println(string(jsonData))
+			}
+		}()
+	}
+
+	// Handle stream mode if enabled
+	var streamChan chan interface{}
+	streamDone := make(chan bool)
+
+	if crawler.Config.Stream {
+		streamChan = crawler.GetDataStream()
+
+		// Consume stream and output entities
+		go func() {
+			for entity := range streamChan {
+				jsonEntity, err := json.Marshal(entity)
+				if err != nil {
+					log.Printf("Failed to marshal stream entity: %v", err)
+					continue
+				}
+				// Prefix with STREAM: so extension can distinguish from profiler data
+				fmt.Printf("STREAM: %s\n", string(jsonEntity))
+			}
+			streamDone <- true
+		}()
+	}
+
+	// Run crawler
+	ctx := context.Background()
+	err = crawler.Run(ctx)
+	if err != nil {
+		log.Fatalf("Crawl failed: %v", err)
+	}
+
+	// Wait for stream to finish if in stream mode
+	if crawler.Config.Stream {
+		close(streamChan)
+		<-streamDone
+	}
+
+	// Get result from crawler context
+	result := crawler.GetData()
+
+	// Output result as JSON (if not in profiler mode and not in stream mode)
+	if !*profilerFlag && !crawler.Config.Stream {
+		jsonResult, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			log.Fatalf("Failed to marshal result: %v", err)
+		}
+		fmt.Println(string(jsonResult))
+	} else if !crawler.Config.Stream {
+		// In profiler mode without streaming, output final result after profiler data
+		jsonResult, err := json.Marshal(result)
+		if err != nil {
+			log.Fatalf("Failed to marshal result: %v", err)
+		}
+		fmt.Printf("RESULT: %s\n", string(jsonResult))
+	}
+}
