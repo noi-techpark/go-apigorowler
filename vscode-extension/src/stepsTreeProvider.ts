@@ -285,12 +285,13 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
         // Determine label based on event type
         let label = profilerData.name || this.getDefaultLabel(eventType, profilerData);
 
-        // Determine collapsible state - START events and page events can have children
+        // Determine collapsible state - container events that can have children
         let collapsibleState = vscode.TreeItemCollapsibleState.None;
         if (eventType === ProfileEventType.EVENT_ROOT_START ||
             eventType === ProfileEventType.EVENT_REQUEST_STEP_START ||
             eventType === ProfileEventType.EVENT_FOREACH_STEP_START ||
-            eventType === ProfileEventType.EVENT_REQUEST_PAGE_START) {
+            eventType === ProfileEventType.EVENT_REQUEST_PAGE_START ||
+            eventType === ProfileEventType.EVENT_ITEM_SELECTION) {
             collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
         }
 

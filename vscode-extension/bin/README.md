@@ -4,7 +4,7 @@ This directory contains pre-built binaries for different platforms.
 
 ## Available Binaries
 
-- **linux/amd64**: `apigorowler-linux-amd64` (9.76 MB)
+- **linux/amd64**: `apigorowler-linux-amd64` (9.77 MB)
 - **linux/arm64**: `apigorowler-linux-arm64` (9.31 MB)
 - **darwin/amd64**: `apigorowler-darwin-amd64` (10.04 MB)
 - **darwin/arm64**: `apigorowler-darwin-arm64` (9.53 MB)
