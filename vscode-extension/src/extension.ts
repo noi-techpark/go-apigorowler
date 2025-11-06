@@ -40,18 +40,57 @@ export function activate(context: vscode.ExtensionContext) {
     // Initialize crawler runner
     crawlerRunner = new CrawlerRunner(stepsTreeProvider, timelineViewProvider, context);
 
+    // Helper to find and focus an ApiGorowler file
+    let lastApiGorowlerFile: vscode.Uri | undefined;
+    const getApiGorowlerDocument = async (): Promise<vscode.TextDocument | undefined> => {
+        // Try active editor first
+        let editor = vscode.window.activeTextEditor;
+        if (editor && isApiGorowlerFile(editor.document)) {
+            lastApiGorowlerFile = editor.document.uri;
+            return editor.document;
+        }
+
+        // Try to find an open ApiGorowler file in visible editors
+        for (const visibleEditor of vscode.window.visibleTextEditors) {
+            if (isApiGorowlerFile(visibleEditor.document)) {
+                await vscode.window.showTextDocument(visibleEditor.document, { preview: false, preserveFocus: false });
+                lastApiGorowlerFile = visibleEditor.document.uri;
+                return visibleEditor.document;
+            }
+        }
+
+        // Try to refocus the last used ApiGorowler file
+        if (lastApiGorowlerFile) {
+            try {
+                const document = await vscode.workspace.openTextDocument(lastApiGorowlerFile);
+                if (isApiGorowlerFile(document)) {
+                    await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+                    return document;
+                }
+            } catch (e) {
+                // File might have been closed or deleted
+                lastApiGorowlerFile = undefined;
+            }
+        }
+
+        // Try to find any open ApiGorowler file in all tabs
+        for (const document of vscode.workspace.textDocuments) {
+            if (isApiGorowlerFile(document)) {
+                await vscode.window.showTextDocument(document, { preview: false, preserveFocus: false });
+                lastApiGorowlerFile = document.uri;
+                return document;
+            }
+        }
+
+        return undefined;
+    };
+
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('apigorowler.run', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('No active editor');
-                return;
-            }
-
-            const document = editor.document;
-            if (!isApiGorowlerFile(document)) {
-                vscode.window.showWarningMessage('This is not an ApiGorowler configuration file');
+            const document = await getApiGorowlerDocument();
+            if (!document) {
+                vscode.window.showWarningMessage('No ApiGorowler configuration file found. Please open an .apigorowler.yaml file.');
                 return;
             }
 
@@ -68,15 +107,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('apigorowler.debug', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('No active editor');
-                return;
-            }
-
-            const document = editor.document;
-            if (!isApiGorowlerFile(document)) {
-                vscode.window.showWarningMessage('This is not an ApiGorowler configuration file');
+            const document = await getApiGorowlerDocument();
+            if (!document) {
+                vscode.window.showWarningMessage('No ApiGorowler configuration file found. Please open an .apigorowler.yaml file.');
                 return;
             }
 
@@ -87,15 +120,9 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('apigorowler.validateConfig', async () => {
-            const editor = vscode.window.activeTextEditor;
-            if (!editor) {
-                vscode.window.showErrorMessage('No active editor');
-                return;
-            }
-
-            const document = editor.document;
-            if (!isApiGorowlerFile(document)) {
-                vscode.window.showWarningMessage('This is not an ApiGorowler configuration file');
+            const document = await getApiGorowlerDocument();
+            if (!document) {
+                vscode.window.showWarningMessage('No ApiGorowler configuration file found. Please open an .apigorowler.yaml file.');
                 return;
             }
 
