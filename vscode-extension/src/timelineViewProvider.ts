@@ -1,14 +1,25 @@
 import * as vscode from 'vscode';
-import { StepProfilerData, ProfileEventType } from './stepsTreeProvider';
+import { StepProfilerData, ProfileEventType, StepsTreeProvider } from './stepsTreeProvider';
 
 // Store events globally so they persist across view lifecycles
 let globalEvents: StepProfilerData[] = [];
 
+// Track collapsed state for each event group by ID
+let collapsedGroups: Set<string> = new Set();
+
 export class TimelineViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'apigorowler.timeline';
     private _view?: vscode.WebviewView;
+    private _outputChannel: vscode.OutputChannel;
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+    constructor(
+        private readonly _extensionUri: vscode.Uri,
+        private readonly _stepsTreeProvider: StepsTreeProvider,
+        outputChannel: vscode.OutputChannel
+    ) {
+        this._outputChannel = outputChannel;
+        this._outputChannel.appendLine('------------------------');
+    }
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -25,12 +36,23 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
         webviewView.webview.onDidReceiveMessage(message => {
-            console.log('[TimelineViewProvider] Received message:', message);
+            this._outputChannel.appendLine('[TimelineViewProvider] Received message: ' + JSON.stringify(message));
             switch (message.command) {
                 case 'selectEvent':
-                    console.log('[TimelineViewProvider] Executing selectStepFromTimeline with eventId:', message.eventId);
+                    this._outputChannel.appendLine('[TimelineViewProvider] Executing selectStepFromTimeline with eventId: ' + message.eventId);
                     // Execute command to select step in tree and show details
                     vscode.commands.executeCommand('apigorowler.selectStepFromTimeline', message.eventId);
+                    break;
+                case 'toggleCollapse':
+                    this._outputChannel.appendLine('[TimelineViewProvider] Toggling collapse for eventId: ' + message.eventId);
+                    // Toggle collapse state
+                    if (collapsedGroups.has(message.eventId)) {
+                        collapsedGroups.delete(message.eventId);
+                    } else {
+                        collapsedGroups.add(message.eventId);
+                    }
+                    // Refresh the timeline
+                    this.refresh();
                     break;
             }
         });
@@ -38,11 +60,29 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
 
     public addEvent(event: StepProfilerData) {
         globalEvents.push(event);
+
+        // Log ALL events to understand what we're receiving
+        this._outputChannel.appendLine('[Timeline addEvent] Event: ' + event.name + ' type: ' + event.type + ' duration: ' + (event.duration || 'undefined'));
+
+        // Log when we receive events with durations (END events)
+        if (event.duration !== undefined) {
+            this._outputChannel.appendLine('[Timeline addEvent] *** END EVENT with duration: ' + event.duration + 'ms');
+
+            // Check if the tree has been updated with this duration
+            const treeStep = this._stepsTreeProvider.getStepById(event.id);
+            if (treeStep) {
+                this._outputChannel.appendLine('[Timeline addEvent] Tree step duration: ' + treeStep.data.duration);
+            } else {
+                this._outputChannel.appendLine('[Timeline addEvent] Step not found in tree!');
+            }
+        }
+
         this.refresh();
     }
 
     public clear() {
         globalEvents = [];
+        collapsedGroups.clear();
         this.refresh();
     }
 
@@ -145,6 +185,22 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                     opacity: 0.8;
                     box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
                 }
+                .collapse-icon {
+                    display: inline-block;
+                    width: 18px;
+                    height: 18px;
+                    margin-right: 6px;
+                    cursor: pointer;
+                    user-select: none;
+                    font-size: 11px;
+                    line-height: 18px;
+                    text-align: center;
+                    flex-shrink: 0;
+                }
+                .collapse-icon:hover {
+                    background: rgba(255, 255, 255, 0.3);
+                    border-radius: 3px;
+                }
                 /* Event type colors - using darker shades for better contrast */
                 .event-root { background: #9370DB; }      /* Medium Purple */
                 .event-request { background: #4A90E2; }   /* Blue */
@@ -225,6 +281,21 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                         });
                     }
 
+                    // Collapse icon click handlers (with event stop propagation)
+                    document.querySelectorAll('.collapse-icon').forEach(icon => {
+                        icon.addEventListener('click', function(e) {
+                            e.stopPropagation(); // Prevent event bar click
+                            const collapseId = this.getAttribute('data-collapse-id');
+                            console.log('[Timeline] Toggling collapse for:', collapseId);
+                            if (collapseId) {
+                                vscode.postMessage({
+                                    command: 'toggleCollapse',
+                                    eventId: collapseId
+                                });
+                            }
+                        });
+                    });
+
                     // Event bars click handlers
                     document.querySelectorAll('.event-bar').forEach(bar => {
                         bar.addEventListener('click', function() {
@@ -264,6 +335,11 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         // Build step groups by pairing START and END events
         const stepGroups = this.buildStepGroups();
 
+        this._outputChannel.appendLine('[Timeline renderTimeline] Built ' + stepGroups.length + ' groups');
+        if (stepGroups.length > 0) {
+            this._outputChannel.appendLine('[Timeline renderTimeline] First group: ' + stepGroups[0].label + ' duration: ' + stepGroups[0].duration);
+        }
+
         if (stepGroups.length === 0) {
             return '<div class="empty-state"><p>No step durations available yet.</p></div>';
         }
@@ -285,13 +361,60 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         }
         timeAxisHtml += '</div>';
 
+        // Helper to count ALL descendants recursively
+        const countAllDescendants = (id: string): number => {
+            const g = stepGroups.find(g => g.id === id);
+            if (!g || g.children.length === 0) {
+                return 0;
+            }
+            let count = g.children.length;
+            for (const childId of g.children) {
+                count += countAllDescendants(childId);
+            }
+            return count;
+        };
+
+        // Filter visible groups based on collapse state
+        const collapsedSet = new Set<string>();
+        const collapsedCounts = new Map<string, number>();
+
+        for (const group of stepGroups) {
+            if (collapsedGroups.has(group.id)) {
+                this._outputChannel.appendLine('[Timeline] Collapsing: ' + group.label + ' (id: ' + group.id.substring(0, 8) + ')');
+
+                // Count all descendants before hiding them
+                const totalDescendants = countAllDescendants(group.id);
+                collapsedCounts.set(group.id, totalDescendants);
+                this._outputChannel.appendLine('[Timeline]   Total descendants to hide: ' + totalDescendants);
+
+                // Add all descendants to collapsed set (recursively)
+                const addDescendants = (id: string, indent: number = 2) => {
+                    const g = stepGroups.find(g => g.id === id);
+                    if (g) {
+                        this._outputChannel.appendLine('[Timeline] ' + '  '.repeat(indent) + 'Hiding children of ' + g.label + ': ' + g.children.length + ' direct children');
+                        for (const childId of g.children) {
+                            collapsedSet.add(childId);
+                            const child = stepGroups.find(cg => cg.id === childId);
+                            if (child) {
+                                this._outputChannel.appendLine('[Timeline] ' + '  '.repeat(indent + 1) + '- ' + child.label);
+                            }
+                            addDescendants(childId, indent + 1);
+                        }
+                    }
+                };
+                addDescendants(group.id);
+            }
+        }
+
+        const visibleGroups = stepGroups.filter(g => !collapsedSet.has(g.id));
+
         // Render step groups
         const rowHeight = 26;
-        const totalHeight = stepGroups.length * rowHeight + 40;
+        const totalHeight = visibleGroups.length * rowHeight + 40;
         let eventsHtml = `<div class="timeline-events" style="min-height: ${totalHeight}px;">`;
         let rowIndex = 0;
 
-        for (const group of stepGroups) {
+        for (const group of visibleGroups) {
             const eventStart = group.startTime - startTime;
             const eventDuration = group.duration;
             const left = eventStart * pixelsPerMs;
@@ -300,6 +423,12 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
             const eventClass = this.getEventClass(group.type);
             const label = group.label;
 
+            const hasChildren = group.children.length > 0;
+            const isCollapsed = collapsedGroups.has(group.id);
+            const collapseIcon = hasChildren ? (isCollapsed ? '▶' : '▼') : '';
+            const totalHidden = collapsedCounts.get(group.id) || 0;
+            const collapsedCount = isCollapsed ? ` (${totalHidden} hidden)` : '';
+
             eventsHtml += `
                 <div class="event-bar ${eventClass}"
                      data-left="${left}"
@@ -307,7 +436,8 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
                      data-event-id="${group.id}"
                      style="left: ${left}px; top: ${top}px; width: ${Math.max(width, 2)}px"
                      title="${label} (${eventDuration.toFixed(2)}ms)">
-                    ${escapeHtml(label)} ${eventDuration.toFixed(0)}ms
+                    ${hasChildren ? `<span class="collapse-icon" data-collapse-id="${group.id}">${collapseIcon}</span>` : ''}
+                    ${escapeHtml(label)} ${eventDuration.toFixed(0)}ms${collapsedCount}
                     ${group.workerId !== undefined ? ` [W${group.workerId}]` : ''}
                 </div>
             `;
@@ -328,7 +458,18 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
         endTime: number;
         duration: number;
         workerId?: number;
+        parentId?: string;
+        children: string[];
     }> {
+        // Get all steps from the tree provider (which has correct hierarchy)
+        const allSteps = this._stepsTreeProvider.getAllSteps();
+        this._outputChannel.appendLine('[Timeline] buildStepGroups - Total steps: ' + allSteps.length);
+
+        // Debug: show first few steps
+        allSteps.slice(0, 10).forEach(s => {
+            this._outputChannel.appendLine('[Timeline]   Step: ' + s.label + ' type: ' + s.data.type + ' duration: ' + s.data.duration + ' hasChildren: ' + (s.children.length > 0));
+        });
+
         const groups: Array<{
             id: string;
             label: string;
@@ -337,56 +478,109 @@ export class TimelineViewProvider implements vscode.WebviewViewProvider {
             endTime: number;
             duration: number;
             workerId?: number;
+            parentId?: string;
+            children: string[];
         }> = [];
 
-        // Map to track START events waiting for END events
-        const startEvents: Map<string, StepProfilerData> = new Map();
+        // Build groups from container steps with durations
+        for (const step of allSteps) {
+            const data = step.data;
 
-        for (const event of globalEvents) {
-            const eventType = event.type;
+            // Only include container steps (Root, Request, ForEach, Page) that appear in timeline
+            const isContainerStep = (
+                data.type === ProfileEventType.EVENT_ROOT_START ||
+                data.type === ProfileEventType.EVENT_REQUEST_STEP_START ||
+                data.type === ProfileEventType.EVENT_FOREACH_STEP_START ||
+                data.type === ProfileEventType.EVENT_REQUEST_PAGE_START
+            );
 
-            // Check if this is a START event
-            if (eventType === ProfileEventType.EVENT_REQUEST_STEP_START ||
-                eventType === ProfileEventType.EVENT_FOREACH_STEP_START ||
-                eventType === ProfileEventType.EVENT_REQUEST_PAGE_START) {
-                startEvents.set(event.id, event);
+            if (!isContainerStep) {
+                continue; // Skip non-container events (details, responses, etc.)
             }
-            // Check if this is an END event
-            else if (eventType === ProfileEventType.EVENT_REQUEST_STEP_END ||
-                     eventType === ProfileEventType.EVENT_FOREACH_STEP_END ||
-                     eventType === ProfileEventType.EVENT_REQUEST_PAGE_END) {
 
-                // Find corresponding START event
-                const startEvent = startEvents.get(event.id);
-                if (startEvent) {
-                    const startTime = new Date(startEvent.timestamp).getTime();
-                    const endTime = new Date(event.timestamp).getTime();
-                    const duration = endTime - startTime;
+            this._outputChannel.appendLine('[Timeline] Found container step: ' + step.label + ' type: ' + data.type + ' duration: ' + data.duration + ' children: ' + step.children.length);
 
-                    let label = startEvent.name || 'Step';
-                    if (startEvent.data?.stepName) {
-                        label = startEvent.data.stepName;
-                    } else if (startEvent.data?.pageNumber) {
-                        label = `Page ${startEvent.data.pageNumber}`;
+            // Must have duration (except root which we calculate)
+            if (!data.duration && data.type !== ProfileEventType.EVENT_ROOT_START) {
+                this._outputChannel.appendLine('[Timeline] Skipping step without duration: ' + step.label);
+                continue;
+            }
+
+            const timestamp = new Date(data.timestamp).getTime();
+            let duration = data.duration || 0;
+            let endTime = timestamp + duration;
+
+            // For root, calculate duration from all descendants recursively
+            if (data.type === ProfileEventType.EVENT_ROOT_START && !data.duration) {
+                this._outputChannel.appendLine('[Timeline] Calculating root duration from children...');
+                const getAllDescendantEndTimes = (treeItem: any): number[] => {
+                    const times: number[] = [];
+                    if (treeItem.data.duration !== undefined) {
+                        const start = new Date(treeItem.data.timestamp).getTime();
+                        times.push(start + treeItem.data.duration);
                     }
+                    for (const child of treeItem.children) {
+                        times.push(...getAllDescendantEndTimes(child));
+                    }
+                    return times;
+                };
 
-                    groups.push({
-                        id: event.id,
-                        label: label,
-                        type: startEvent.type,
-                        startTime: startTime,
-                        endTime: endTime,
-                        duration: duration,
-                        workerId: startEvent.workerId
-                    });
-
-                    startEvents.delete(event.id);
+                const allEndTimes = getAllDescendantEndTimes(step);
+                this._outputChannel.appendLine('[Timeline] Root - found ' + allEndTimes.length + ' descendant end times');
+                if (allEndTimes.length > 0) {
+                    endTime = Math.max(...allEndTimes);
+                    duration = endTime - timestamp;
+                    this._outputChannel.appendLine('[Timeline] Root calculated duration: ' + duration + ' ms');
                 }
             }
+
+            // Recursively collect all container-type descendants (not just direct children)
+            // This handles cases like forEach where Item Selection events are intermediaries
+            const collectContainerDescendants = (treeItem: any): string[] => {
+                const containerIds: string[] = [];
+                for (const child of treeItem.children) {
+                    const isContainer = (
+                        child.data.type === ProfileEventType.EVENT_ROOT_START ||
+                        child.data.type === ProfileEventType.EVENT_REQUEST_STEP_START ||
+                        child.data.type === ProfileEventType.EVENT_FOREACH_STEP_START ||
+                        child.data.type === ProfileEventType.EVENT_REQUEST_PAGE_START
+                    );
+
+                    if (isContainer) {
+                        containerIds.push(child.data.id);
+                    } else {
+                        // Not a container (e.g., Item Selection), recurse into its children
+                        containerIds.push(...collectContainerDescendants(child));
+                    }
+                }
+                return containerIds;
+            };
+
+            const containerChildren = collectContainerDescendants(step);
+
+            this._outputChannel.appendLine('[Timeline] Adding group: ' + step.label + ' with ' + containerChildren.length + ' container children');
+            if (containerChildren.length > 0) {
+                this._outputChannel.appendLine('[Timeline]   Children IDs: ' + containerChildren.slice(0, 3).join(', ') + (containerChildren.length > 3 ? '...' : ''));
+            }
+
+            groups.push({
+                id: data.id,
+                label: step.label as string,
+                type: data.type,
+                startTime: timestamp,
+                endTime: endTime,
+                duration: duration,
+                workerId: data.workerId,
+                parentId: data.parentId,
+                children: containerChildren
+            });
         }
 
-        // Sort by start time
+        // Sort by start time for display order
         groups.sort((a, b) => a.startTime - b.startTime);
+
+        this._outputChannel.appendLine('[Timeline] buildStepGroups - Created ' + groups.length + ' groups');
+        groups.forEach(g => this._outputChannel.appendLine('[Timeline]   - ' + g.label + ' ' + g.duration + 'ms children: ' + g.children.length));
 
         return groups;
     }

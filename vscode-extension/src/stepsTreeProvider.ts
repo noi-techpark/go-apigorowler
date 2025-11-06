@@ -282,10 +282,18 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
             // Find the corresponding START event by ID
             // END events share the same ID as their START events in our system
             const startItem = this.stepMap.get(profilerData.id);
-            if (startItem && profilerData.duration !== undefined) {
+            if (startItem) {
+                // Calculate duration from timestamps if not provided
+                let duration = profilerData.duration;
+                if (duration === undefined) {
+                    const startTime = new Date(startItem.data.timestamp).getTime();
+                    const endTime = new Date(profilerData.timestamp).getTime();
+                    duration = endTime - startTime;
+                }
+
                 // Enrich the START event with duration
-                startItem.data.duration = profilerData.duration;
-                startItem.description = `${profilerData.duration}ms`;
+                startItem.data.duration = duration;
+                startItem.description = `${duration}ms`;
 
                 // Update tooltip to include duration
                 startItem.tooltip = this.getUpdatedTooltip(startItem);
@@ -408,6 +416,10 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
 
     getStepById(id: string): StepTreeItem | undefined {
         return this.stepMap.get(id);
+    }
+
+    getAllSteps(): StepTreeItem[] {
+        return Array.from(this.stepMap.values());
     }
 
     private getUpdatedTooltip(item: StepTreeItem): string {

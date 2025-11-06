@@ -24,8 +24,12 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(stepsTreeView);
 
+    // Create output channel for timeline debugging
+    const timelineOutputChannel = vscode.window.createOutputChannel('ApiGorowler Timeline');
+    context.subscriptions.push(timelineOutputChannel);
+
     // Register timeline webview view provider BEFORE crawler runner
-    timelineViewProvider = new TimelineViewProvider(context.extensionUri);
+    timelineViewProvider = new TimelineViewProvider(context.extensionUri, stepsTreeProvider, timelineOutputChannel);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
             TimelineViewProvider.viewType,
