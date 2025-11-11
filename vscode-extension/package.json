@@ -133,6 +133,13 @@
           "icon": "$(list-tree)",
           "contextualTitle": "ApiGorowler Steps"
         }
+      ],
+      "apigorowler-panel": [
+        {
+          "type": "webview",
+          "id": "apigorowler.timeline",
+          "name": "Execution Timeline"
+        }
       ]
     },
     "viewsContainers": {
@@ -141,6 +148,13 @@
           "id": "apigorowler",
           "title": "ApiGorowler",
           "icon": "$(globe)"
+        }
+      ],
+      "panel": [
+        {
+          "id": "apigorowler-panel",
+          "title": "ApiGorowler Timeline",
+          "icon": "$(graph-line)"
         }
       ]
     },
@@ -213,6 +227,7 @@
   },
   "dependencies": {
     "diff": "^8.0.2",
+    "jsdiff": "^1.1.1",
     "yaml": "^2.3.0"
   },
   "repository": {
