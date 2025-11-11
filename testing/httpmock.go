@@ -47,14 +47,34 @@ type MockConfig struct {
 }
 
 type MockRoundTripper struct {
-	MockMap      map[string]string      // normalized URL => filepath (legacy)
-	Expectations []MockExpectation      // new validation-based mocks
-	ValidateOnly bool                   // if true, only validate without matching response
-	Errors       []string               // validation errors
+	MockMap       map[string]string                                      // normalized URL => filepath (legacy)
+	Expectations  []MockExpectation                                      // new validation-based mocks
+	ValidateOnly  bool                                                   // if true, only validate without matching response
+	Errors        []string                                               // validation errors
+	InterceptFunc func(req *http.Request, resp *http.Response)          // function to intercept and modify responses
 }
 
 func NewMockRoundTripper(config map[string]string) *MockRoundTripper {
 	return &MockRoundTripper{MockMap: normalizeMapKeys(config)}
+}
+
+func NewMockRoundTripperWithResponse(responses map[string]interface{}) *MockRoundTripper {
+	expectations := make([]MockExpectation, 0)
+	for url, body := range responses {
+		expectations = append(expectations, MockExpectation{
+			Request: MockRequest{
+				URL: url,
+			},
+			Response: MockResponse{
+				StatusCode: http.StatusOK,
+				BodyJSON:   body,
+			},
+		})
+	}
+	return &MockRoundTripper{
+		Expectations: expectations,
+		Errors:       make([]string, 0),
+	}
 }
 
 func NewMockRoundTripperFromYAML(yamlPath string) (*MockRoundTripper, error) {
@@ -103,12 +123,19 @@ func (m *MockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 		}, nil
 	}
 
-	return &http.Response{
+	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(bytes.NewBuffer(data)),
 		Header:     http.Header{"Content-Type": []string{"application/json"}},
 		Request:    req,
-	}, nil
+	}
+
+	// Call intercept function if set
+	if m.InterceptFunc != nil {
+		m.InterceptFunc(req, resp)
+	}
+
+	return resp, nil
 }
 
 func (m *MockRoundTripper) roundTripWithExpectations(req *http.Request) (*http.Response, error) {
@@ -278,12 +305,19 @@ func (m *MockRoundTripper) buildResponse(req *http.Request, response *MockRespon
 		}
 	}
 
-	return &http.Response{
+	resp := &http.Response{
 		StatusCode: statusCode,
 		Body:       io.NopCloser(bytes.NewBuffer(bodyData)),
 		Header:     headers,
 		Request:    req,
-	}, nil
+	}
+
+	// Call intercept function if set
+	if m.InterceptFunc != nil {
+		m.InterceptFunc(req, resp)
+	}
+
+	return resp, nil
 }
 
 // deepEqual compares two values for equality (simplified version)
@@ -328,4 +362,9 @@ func normalizeURL(u *url.URL) string {
 		return base + "?" + strings.Join(sorted, "&")
 	}
 	return base
+}
+
+// CreateResponseBody creates an io.ReadCloser from a string
+func CreateResponseBody(body string) io.ReadCloser {
+	return io.NopCloser(bytes.NewBufferString(body))
 }

@@ -219,8 +219,6 @@ type Config struct {
 	Authentication *AuthenticatorConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 	Headers        map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
 	Stream         bool                 `yaml:"stream,omitempty" json:"stream,omitempty"`
-	MaxConcurrency int                  `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
-	RateLimit      *RateLimitConfig     `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
 }
 
 type Step struct {
@@ -302,14 +300,6 @@ type forEachResult struct {
 	threadID       int
 }
 
-// parallelExecutor manages parallel execution of forEach iterations
-type parallelExecutor struct {
-	maxConcurrency int
-	rateLimiter    *rate.Limiter
-	resultsChan    chan forEachResult
-	profilerMutex  sync.Mutex
-}
-
 type ApiCrawler struct {
 	Config              Config
 	ContextMap          map[string]*Context
@@ -365,7 +355,7 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 
 	// instantiate global authenticator
 	if cfg.Authentication != nil {
-		c.globalAuthenticator = NewAuthenticator(*cfg.Authentication)
+		c.globalAuthenticator = NewAuthenticator(*cfg.Authentication, c.httpClient)
 	} else {
 		c.globalAuthenticator = NoopAuthenticator{}
 	}
@@ -544,9 +534,8 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 		event.Data = map[string]any{
 			"contextMap": serializeContextMap(c.ContextMap),
 			"config": map[string]any{
-				"rootContext":    c.Config.RootContext,
-				"stream":         c.Config.Stream,
-				"maxConcurrency": c.Config.MaxConcurrency,
+				"rootContext": c.Config.RootContext,
+				"stream":      c.Config.Stream,
 			},
 		}
 		c.profiler <- event
@@ -604,7 +593,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	// Determine authenticator (request-specific overrides global)
 	authenticator := c.globalAuthenticator
 	if exec.step.Request.Authentication != nil {
-		authenticator = NewAuthenticator(*exec.step.Request.Authentication)
+		authenticator = NewAuthenticator(*exec.step.Request.Authentication, c.httpClient)
 	}
 
 	// Initialize paginator
@@ -985,14 +974,12 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 }
 
 // createRateLimiter creates a rate limiter from config, returns nil if no rate limiting
-func createRateLimiter(stepLimit, globalLimit *RateLimitConfig) *rate.Limiter {
+func createRateLimiter(stepLimit *RateLimitConfig) *rate.Limiter {
 	var limitConfig *RateLimitConfig
 
 	// Step-level rate limit takes precedence
 	if stepLimit != nil {
 		limitConfig = stepLimit
-	} else if globalLimit != nil {
-		limitConfig = globalLimit
 	}
 
 	if limitConfig == nil || limitConfig.RequestsPerSecond <= 0 {
@@ -1218,14 +1205,11 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 		// Determine max concurrency (step > global > default)
 		maxConcurrency := exec.step.MaxConcurrency
 		if maxConcurrency == 0 {
-			maxConcurrency = c.Config.MaxConcurrency
-		}
-		if maxConcurrency == 0 {
 			maxConcurrency = 10 // Default concurrency
 		}
 
 		// Create rate limiter if configured
-		rateLimiter := createRateLimiter(exec.step.RateLimit, c.Config.RateLimit)
+		rateLimiter := createRateLimiter(exec.step.RateLimit)
 
 		// Emit PARALLELISM_SETUP event
 		if c.profiler != nil {
@@ -1245,9 +1229,6 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 				if exec.step.RateLimit != nil {
 					event.Data["rateLimit"] = exec.step.RateLimit.RequestsPerSecond
 					event.Data["burst"] = exec.step.RateLimit.Burst
-				} else if c.Config.RateLimit != nil {
-					event.Data["rateLimit"] = c.Config.RateLimit.RequestsPerSecond
-					event.Data["burst"] = c.Config.RateLimit.Burst
 				}
 			}
 			c.profiler <- event
