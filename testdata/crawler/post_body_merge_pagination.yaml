@@ -15,8 +15,8 @@ steps:
       pagination:
         stopOn:
           - type: pageNum
-            compare: gte
-            value: 1
+            compare: gte  # Note: pageNum type currently ignores compare field and always uses >=
+            value: 2
         params:
           - name: offset
             location: body

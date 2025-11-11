@@ -437,16 +437,21 @@ func TestParallelMultiRootParallel(t *testing.T) {
 }
 
 func TestPostJSONBody(t *testing.T) {
-	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/users": "testdata/crawler/post_json_body/response.json",
-	})
+	mockTransport, err := crawler_testing.NewMockRoundTripperFromYAML("testdata/crawler/post_json_body/mocks.yaml")
+	require.Nil(t, err)
 
 	craw, _, _ := NewApiCrawler("testdata/crawler/post_json_body.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err = craw.Run(context.TODO())
 	require.Nil(t, err)
+
+	// Check for validation errors
+	validationErrors := mockTransport.GetErrors()
+	if len(validationErrors) > 0 {
+		t.Fatalf("Mock validation failed: %v", validationErrors)
+	}
 
 	data := craw.GetData()
 
@@ -458,16 +463,21 @@ func TestPostJSONBody(t *testing.T) {
 }
 
 func TestPostFormURLEncoded(t *testing.T) {
-	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/login": "testdata/crawler/post_form_urlencoded/response.json",
-	})
+	mockTransport, err := crawler_testing.NewMockRoundTripperFromYAML("testdata/crawler/post_form_urlencoded/mocks.yaml")
+	require.Nil(t, err)
 
 	craw, _, _ := NewApiCrawler("testdata/crawler/post_form_urlencoded.yaml")
 	client := &http.Client{Transport: mockTransport}
 	craw.SetClient(client)
 
-	err := craw.Run(context.TODO())
+	err = craw.Run(context.TODO())
 	require.Nil(t, err)
+
+	// Check for validation errors
+	validationErrors := mockTransport.GetErrors()
+	if len(validationErrors) > 0 {
+		t.Fatalf("Mock validation failed: %v", validationErrors)
+	}
 
 	data := craw.GetData()
 
@@ -479,11 +489,8 @@ func TestPostFormURLEncoded(t *testing.T) {
 }
 
 func TestPostBodyMergePagination(t *testing.T) {
-	// Mock transport needs to handle POST requests with different body params
-	// For simplicity, we'll use a custom handler that checks the request
-	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/search": "testdata/crawler/post_body_merge_pagination/response_page0.json",
-	})
+	mockTransport, err := crawler_testing.NewMockRoundTripperFromYAML("testdata/crawler/post_body_merge_pagination/mocks.yaml")
+	require.Nil(t, err)
 
 	craw, validationErrors, err := NewApiCrawler("testdata/crawler/post_body_merge_pagination.yaml")
 	if err != nil {
@@ -498,6 +505,12 @@ func TestPostBodyMergePagination(t *testing.T) {
 	err = craw.Run(context.TODO())
 	require.Nil(t, err)
 
+	// Check for validation errors
+	mockValidationErrors := mockTransport.GetErrors()
+	if len(mockValidationErrors) > 0 {
+		t.Fatalf("Mock validation failed: %v", mockValidationErrors)
+	}
+
 	data := craw.GetData()
 
 	// Check that results were merged correctly
@@ -506,5 +519,5 @@ func TestPostBodyMergePagination(t *testing.T) {
 
 	results, ok := resultMap["results"].([]interface{})
 	require.True(t, ok, "results should be an array")
-	require.GreaterOrEqual(t, len(results), 2, "Should have at least 2 results")
+	require.Equal(t, 4, len(results), "Should have exactly 4 results (2 pages)")
 }
