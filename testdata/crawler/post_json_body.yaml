@@ -1,0 +1,14 @@
+rootContext:
+  results: []
+
+steps:
+  - type: request
+    name: Create User with JSON Body
+    request:
+      url: https://api.example.com/users
+      method: POST
+      body:
+        username: testuser
+        email: test@example.com
+      contentType: application/json
+    mergeOn: .results += [$res]

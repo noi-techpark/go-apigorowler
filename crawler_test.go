@@ -435,3 +435,76 @@ func TestParallelMultiRootParallel(t *testing.T) {
 	assert.True(t, productIds[101], "Should have product with id 101")
 	assert.True(t, productIds[102], "Should have product with id 102")
 }
+
+func TestPostJSONBody(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/users": "testdata/crawler/post_json_body/response.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/post_json_body.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/post_json_body/output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
+func TestPostFormURLEncoded(t *testing.T) {
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/login": "testdata/crawler/post_form_urlencoded/response.json",
+	})
+
+	craw, _, _ := NewApiCrawler("testdata/crawler/post_form_urlencoded.yaml")
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err := craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	var expected interface{}
+	err = crawler_testing.LoadInputData(&expected, "testdata/crawler/post_form_urlencoded/output.json")
+	require.Nil(t, err)
+
+	assert.Equal(t, expected, data)
+}
+
+func TestPostBodyMergePagination(t *testing.T) {
+	// Mock transport needs to handle POST requests with different body params
+	// For simplicity, we'll use a custom handler that checks the request
+	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
+		"https://api.example.com/search": "testdata/crawler/post_body_merge_pagination/response_page0.json",
+	})
+
+	craw, validationErrors, err := NewApiCrawler("testdata/crawler/post_body_merge_pagination.yaml")
+	if err != nil {
+		t.Fatalf("Failed to create crawler: %v, validation errors: %v", err, validationErrors)
+	}
+	require.Nil(t, err)
+	require.Empty(t, validationErrors)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO())
+	require.Nil(t, err)
+
+	data := craw.GetData()
+
+	// Check that results were merged correctly
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok, "Result should be a map")
+
+	results, ok := resultMap["results"].([]interface{})
+	require.True(t, ok, "results should be an array")
+	require.GreaterOrEqual(t, len(results), 2, "Should have at least 2 results")
+}

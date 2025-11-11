@@ -1,0 +1,26 @@
+rootContext:
+  results: []
+
+steps:
+  - type: request
+    name: Search with Pagination and Filters
+    request:
+      url: https://api.example.com/search
+      method: POST
+      body:
+        query: "golang"
+        filters:
+          category: "programming"
+      contentType: application/json
+      pagination:
+        stopOn:
+          - type: pageNum
+            compare: gte
+            value: 1
+        params:
+          - name: offset
+            location: body
+            type: int
+            increment: "+ 10"
+            default: "0"
+    mergeOn: .results += $res

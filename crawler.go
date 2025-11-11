@@ -101,43 +101,6 @@ func newProfilerEventWithWorker(eventType ProfileEventType, name string, parentI
 	return event
 }
 
-func getEventPrefix(eventType ProfileEventType) string {
-	switch eventType {
-	case EVENT_ROOT_START:
-		return "root"
-	case EVENT_REQUEST_STEP_START, EVENT_REQUEST_STEP_END:
-		return "request"
-	case EVENT_REQUEST_PAGE_START, EVENT_REQUEST_PAGE_END:
-		return "page"
-	case EVENT_CONTEXT_SELECTION:
-		return "context"
-	case EVENT_PAGINATION_EVAL:
-		return "pagination"
-	case EVENT_URL_COMPOSITION:
-		return "url"
-	case EVENT_REQUEST_DETAILS:
-		return "details"
-	case EVENT_REQUEST_RESPONSE:
-		return "response"
-	case EVENT_RESPONSE_TRANSFORM:
-		return "transform"
-	case EVENT_CONTEXT_MERGE:
-		return "merge"
-	case EVENT_FOREACH_STEP_START, EVENT_FOREACH_STEP_END:
-		return "foreach"
-	case EVENT_PARALLELISM_SETUP:
-		return "parallelism"
-	case EVENT_ITEM_SELECTION:
-		return "item"
-	case EVENT_RESULT:
-		return "result"
-	case EVENT_STREAM_RESULT:
-		return "stream"
-	default:
-		return "event"
-	}
-}
-
 // serializeContextMap converts a context map to a safe serializable format
 func serializeContextMap(contextMap map[string]*Context) map[string]any {
 	result := make(map[string]any)
@@ -282,7 +245,8 @@ type RequestConfig struct {
 	URL            string               `yaml:"url" json:"url"`
 	Method         string               `yaml:"method" json:"method"`
 	Headers        map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
-	Body           string               `yaml:"body,omitempty" json:"body,omitempty"`
+	Body           map[string]any       `yaml:"body,omitempty" json:"body,omitempty"`
+	ContentType    string               `yaml:"contentType,omitempty" json:"contentType,omitempty"`
 	Pagination     Pagination           `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	Authentication *AuthenticatorConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
@@ -318,13 +282,15 @@ type mergeOperation struct {
 
 // httpRequestContext encapsulates HTTP request preparation parameters
 type httpRequestContext struct {
-	urlTemplate   string
-	method        string
-	headers       map[string]string
-	bodyParams    map[string]interface{}
-	queryParams   map[string]string
-	nextPageURL   string
-	authenticator Authenticator
+	urlTemplate    string
+	method         string
+	headers        map[string]string
+	configuredBody map[string]any
+	bodyParams     map[string]interface{}
+	contentType    string
+	queryParams    map[string]string
+	nextPageURL    string
+	authenticator  Authenticator
 }
 
 // forEachResult holds the result of a single forEach iteration
@@ -679,13 +645,15 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		// Prepare HTTP request
 		reqCtx := httpRequestContext{
-			urlTemplate:   exec.step.Request.URL,
-			method:        exec.step.Request.Method,
-			headers:       exec.step.Request.Headers,
-			bodyParams:    next.BodyParams,
-			queryParams:   next.QueryParams,
-			nextPageURL:   next.NextPageUrl,
-			authenticator: authenticator,
+			urlTemplate:    exec.step.Request.URL,
+			method:         exec.step.Request.Method,
+			headers:        exec.step.Request.Headers,
+			configuredBody: exec.step.Request.Body,
+			bodyParams:     next.BodyParams,
+			contentType:    exec.step.Request.ContentType,
+			queryParams:    next.QueryParams,
+			nextPageURL:    next.NextPageUrl,
+			authenticator:  authenticator,
 		}
 
 		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx, c.Config.Headers)
@@ -891,10 +859,10 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			event := newProfilerEvent(EVENT_CONTEXT_SELECTION, "Context Selection", pageID, exec.step)
 			contextPath := buildContextPath(childContextMap, thisContextKey)
 			event.Data = map[string]any{
-				"contextPath":         contextPath,
-				"currentContextKey":   thisContextKey,
-				"currentContextData":  copyDataSafe(childContextMap[thisContextKey].Data),
-				"fullContextMap":      serializeContextMap(childContextMap),
+				"contextPath":        contextPath,
+				"currentContextKey":  thisContextKey,
+				"currentContextData": copyDataSafe(childContextMap[thisContextKey].Data),
+				"fullContextMap":     serializeContextMap(childContextMap),
 			}
 			c.profiler <- event
 		}
@@ -1325,9 +1293,9 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 			if c.profiler != nil {
 				event := newProfilerEvent(EVENT_ITEM_SELECTION, fmt.Sprintf("Item %d", i), stepID, exec.step)
 				event.Data = map[string]any{
-					"iterationIndex":    i,
-					"itemValue":         copyDataSafe(item),
-					"currentContextKey": exec.step.As,
+					"iterationIndex":     i,
+					"itemValue":          copyDataSafe(item),
+					"currentContextKey":  exec.step.As,
 					"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
 				}
 				c.profiler <- event
@@ -1561,14 +1529,42 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 	urlObj.RawQuery = query.Encode()
 
-	// Prepare request body
+	// Merge configured body with pagination body params
+	mergedBody := make(map[string]any)
+	for k, v := range ctx.configuredBody {
+		mergedBody[k] = v
+	}
+	for k, v := range ctx.bodyParams {
+		mergedBody[k] = v
+	}
+
+	// Determine content type (default to JSON if not specified)
+	contentType := ctx.contentType
+	if contentType == "" && len(mergedBody) > 0 {
+		contentType = "application/json"
+	}
+
+	// Prepare request body based on content type
 	var reqBody io.Reader
-	if len(ctx.bodyParams) > 0 {
-		bodyJSON, err := json.Marshal(ctx.bodyParams)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error encoding body params: %w", err)
+	if len(mergedBody) > 0 {
+		switch contentType {
+		case "application/json":
+			bodyJSON, err := json.Marshal(mergedBody)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error encoding JSON body: %w", err)
+			}
+			reqBody = bytes.NewReader(bodyJSON)
+
+		case "application/x-www-form-urlencoded":
+			formData := url.Values{}
+			for k, v := range mergedBody {
+				formData.Set(k, fmt.Sprintf("%v", v))
+			}
+			reqBody = bytes.NewReader([]byte(formData.Encode()))
+
+		default:
+			return nil, nil, fmt.Errorf("unsupported content type: %s", contentType)
 		}
-		reqBody = bytes.NewReader(bodyJSON)
 	}
 
 	// Create HTTP request
@@ -1583,6 +1579,11 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 	for k, v := range ctx.headers {
 		req.Header.Set(k, v)
+	}
+
+	// Set Content-Type header if body is present
+	if len(mergedBody) > 0 && contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	// Apply authentication
