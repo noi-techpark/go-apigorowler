@@ -208,6 +208,26 @@ func validateRequest(req RequestConfig, location string) []ValidationError {
 		if m != "GET" && m != "POST" {
 			errs = append(errs, ValidationError{"request.method must be GET or POST", location + ".method"})
 		}
+
+		// POST requests with body must specify Content-Type
+		if m == "POST" {
+			hasContentType := req.ContentType != ""
+			if !hasContentType && req.Headers != nil {
+				// Check if Content-Type is set in headers
+				for key := range req.Headers {
+					if strings.ToLower(key) == "content-type" {
+						hasContentType = true
+						break
+					}
+				}
+			}
+			if !hasContentType {
+				errs = append(errs, ValidationError{
+					"POST requests must specify contentType or Content-Type header",
+					location + ".contentType",
+				})
+			}
+		}
 	}
 
 	if req.Authentication != nil {
