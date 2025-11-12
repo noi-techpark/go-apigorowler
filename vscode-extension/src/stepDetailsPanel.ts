@@ -389,9 +389,23 @@ export class StepDetailsPanel {
                 return this.renderParallelismSetup(data);
             case ProfileEventType.EVENT_ITEM_SELECTION:
                 return this.renderItemSelection(data);
+            case ProfileEventType.EVENT_AUTH_START:
+            case ProfileEventType.EVENT_AUTH_END:
+                return this.renderAuthStartEnd(data);
+            case ProfileEventType.EVENT_AUTH_CACHED:
+                return this.renderAuthCached(data);
+            case ProfileEventType.EVENT_AUTH_LOGIN_START:
+            case ProfileEventType.EVENT_AUTH_LOGIN_END:
+                return this.renderAuthLogin(data);
+            case ProfileEventType.EVENT_AUTH_TOKEN_EXTRACT:
+                return this.renderAuthTokenExtract(data);
+            case ProfileEventType.EVENT_AUTH_TOKEN_INJECT:
+                return this.renderAuthTokenInject(data);
             case ProfileEventType.EVENT_RESULT:
             case ProfileEventType.EVENT_STREAM_RESULT:
                 return this.renderResult(data);
+            case ProfileEventType.EVENT_ERROR:
+                return this.renderError(data);
             default:
                 return this.renderGeneric(data);
         }
@@ -981,6 +995,341 @@ export class StepDetailsPanel {
                     <div class="code-block" id="${resultId}">${escapeHtml(result)}</div>
                 </details>
             </div>
+        `;
+    }
+
+    private renderAuthStartEnd(data: StepProfilerData): string {
+        const authType = data.data?.authType || 'unknown';
+        const isStart = data.type === ProfileEventType.EVENT_AUTH_START;
+        const duration = data.duration ? `${data.duration}ms` : '';
+
+        return `
+            <div class="header">
+                <h2>🔐 ${isStart ? 'Authentication Start' : 'Authentication End'}: ${authType}</h2>
+                <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
+                ${duration ? `<div class="timestamp">⏱️  Duration: ${duration}</div>` : ''}
+            </div>
+
+            <div class="section">
+                <div class="section-title">Authentication Type</div>
+                <div class="code-block">${authType}</div>
+            </div>
+
+            ${data.data?.error ? `
+            <div class="section">
+                <div class="section-title">Error</div>
+                <div class="code-block status-error">${escapeHtml(data.data.error)}</div>
+            </div>
+            ` : ''}
+
+            ${data.data ? `
+            <div class="section">
+                <details>
+                    <summary>Authentication Data</summary>
+                    <div class="code-block">${escapeHtml(JSON.stringify(data.data, null, 2))}</div>
+                </details>
+            </div>
+            ` : ''}
+        `;
+    }
+
+    private renderAuthCached(data: StepProfilerData): string {
+        const token = data.data?.token || '';
+        const age = data.data?.age || '';
+        const cookieName = data.data?.cookieName || '';
+        const cookieValue = data.data?.cookieValue || '';
+
+        return `
+            <div class="header">
+                <h2>💾 Cached Credentials</h2>
+                <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
+            </div>
+
+            ${age ? `
+            <div class="section">
+                <div class="section-title">Cache Age</div>
+                <div class="code-block">${age}</div>
+            </div>
+            ` : ''}
+
+            ${token ? `
+            <div class="section">
+                <div class="section-title">Token (Masked)</div>
+                <div class="code-block">${escapeHtml(token)}</div>
+            </div>
+            ` : ''}
+
+            ${cookieName ? `
+            <div class="section">
+                <div class="section-title">Cookie Name</div>
+                <div class="code-block">${escapeHtml(cookieName)}</div>
+            </div>
+            ` : ''}
+
+            ${cookieValue ? `
+            <div class="section">
+                <div class="section-title">Cookie Value (Masked)</div>
+                <div class="code-block">${escapeHtml(cookieValue)}</div>
+            </div>
+            ` : ''}
+
+            <div class="info-box">
+                ℹ️  Using cached authentication credentials - no new login required
+            </div>
+        `;
+    }
+
+    private renderAuthLogin(data: StepProfilerData): string {
+        const isStart = data.type === ProfileEventType.EVENT_AUTH_LOGIN_START;
+        const url = data.data?.url || '';
+        const method = data.data?.method || '';
+        const duration = data.duration ? `${data.duration}ms` : '';
+        const statusCode = data.data?.statusCode;
+        const error = data.data?.error;
+        const token = data.data?.token || '';
+
+        return `
+            <div class="header">
+                <h2>🔑 ${isStart ? 'Login Request' : error ? 'Login Failed' : 'Login Complete'}</h2>
+                <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
+                ${duration ? `<div class="timestamp">⏱️  Duration: ${duration}</div>` : ''}
+            </div>
+
+            ${url ? `
+            <div class="section">
+                <div class="section-title">Login URL</div>
+                <div class="code-block">${method} ${escapeHtml(url)}</div>
+            </div>
+            ` : ''}
+
+            ${statusCode ? `
+            <div class="section">
+                <div class="section-title">Status Code</div>
+                <span class="status-badge ${statusCode >= 200 && statusCode < 300 ? 'status-success' : 'status-error'}">${statusCode}</span>
+            </div>
+            ` : ''}
+
+            ${error ? `
+            <div class="section">
+                <div class="section-title">Error</div>
+                <div class="code-block status-error">${escapeHtml(error)}</div>
+            </div>
+            ` : ''}
+
+            ${token ? `
+            <div class="section">
+                <div class="section-title">Token (Masked)</div>
+                <div class="code-block">${escapeHtml(token)}</div>
+            </div>
+            ` : ''}
+
+            ${data.data ? `
+            <div class="section">
+                <details>
+                    <summary>Full Login Data</summary>
+                    <div class="code-block">${escapeHtml(JSON.stringify(data.data, null, 2))}</div>
+                </details>
+            </div>
+            ` : ''}
+        `;
+    }
+
+    private renderAuthTokenExtract(data: StepProfilerData): string {
+        const extractFrom = data.data?.extractFrom || data.data?.extractSelector || '';
+        const token = data.data?.token || '';
+        const cookieName = data.data?.cookieName || '';
+        const cookieValue = data.data?.cookieValue || '';
+        const headerName = data.data?.headerName || '';
+        const jqSelector = data.data?.jqSelector || '';
+
+        return `
+            <div class="header">
+                <h2>🔍 Token Extraction</h2>
+                <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
+            </div>
+
+            ${extractFrom ? `
+            <div class="section">
+                <div class="section-title">Extract From</div>
+                <div class="code-block">${escapeHtml(extractFrom)}</div>
+            </div>
+            ` : ''}
+
+            ${cookieName ? `
+            <div class="section">
+                <div class="section-title">Cookie Name</div>
+                <div class="code-block">${escapeHtml(cookieName)}</div>
+            </div>
+            ` : ''}
+
+            ${cookieValue ? `
+            <div class="section">
+                <div class="section-title">Cookie Value (Masked)</div>
+                <div class="code-block">${escapeHtml(cookieValue)}</div>
+            </div>
+            ` : ''}
+
+            ${headerName ? `
+            <div class="section">
+                <div class="section-title">Header Name</div>
+                <div class="code-block">${escapeHtml(headerName)}</div>
+            </div>
+            ` : ''}
+
+            ${jqSelector ? `
+            <div class="section">
+                <div class="section-title">JQ Selector</div>
+                <div class="code-block">${escapeHtml(jqSelector)}</div>
+            </div>
+            ` : ''}
+
+            ${token ? `
+            <div class="section">
+                <div class="section-title">Extracted Token (Masked)</div>
+                <div class="code-block">${escapeHtml(token)}</div>
+            </div>
+            ` : ''}
+
+            <div class="info-box">
+                ℹ️  Token successfully extracted from login response
+            </div>
+        `;
+    }
+
+    private renderAuthTokenInject(data: StepProfilerData): string {
+        const location = data.data?.location || '';
+        const format = data.data?.format || '';
+        const token = data.data?.token || '';
+        const headerKey = data.data?.headerKey || '';
+        const queryKey = data.data?.queryKey || '';
+        const cookieName = data.data?.cookieName || '';
+        const cookieValue = data.data?.cookieValue || '';
+
+        return `
+            <div class="header">
+                <h2>➡️  Token Injection</h2>
+                <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Injection Location</div>
+                <div class="code-block">${escapeHtml(location)}</div>
+            </div>
+
+            ${format ? `
+            <div class="section">
+                <div class="section-title">Format</div>
+                <div class="code-block">${escapeHtml(format)}</div>
+            </div>
+            ` : ''}
+
+            ${token ? `
+            <div class="section">
+                <div class="section-title">Token (Masked)</div>
+                <div class="code-block">${escapeHtml(token)}</div>
+            </div>
+            ` : ''}
+
+            ${headerKey ? `
+            <div class="section">
+                <div class="section-title">Header Key</div>
+                <div class="code-block">${escapeHtml(headerKey)}</div>
+            </div>
+            ` : ''}
+
+            ${queryKey ? `
+            <div class="section">
+                <div class="section-title">Query Parameter Key</div>
+                <div class="code-block">${escapeHtml(queryKey)}</div>
+            </div>
+            ` : ''}
+
+            ${cookieName ? `
+            <div class="section">
+                <div class="section-title">Cookie Name</div>
+                <div class="code-block">${escapeHtml(cookieName)}</div>
+            </div>
+            ` : ''}
+
+            ${cookieValue ? `
+            <div class="section">
+                <div class="section-title">Cookie Value (Masked)</div>
+                <div class="code-block">${escapeHtml(cookieValue)}</div>
+            </div>
+            ` : ''}
+
+            <div class="info-box">
+                ℹ️  Credentials injected into request - ready to send authenticated request
+            </div>
+        `;
+    }
+
+    private renderError(data: StepProfilerData): string {
+        const error = data.data?.error || data.data?.message || 'Unknown error';
+        const errorType = data.data?.errorType || data.data?.type || 'Error';
+        const stackTrace = data.data?.stackTrace || data.data?.stack || '';
+        const stepName = data.data?.stepName || data.name || '';
+        const errorDetails = data.data?.details || '';
+        const duration = data.duration ? `${data.duration}ms` : '';
+        const errorId = `error-message-${data.id}`;
+        const stackId = `error-stack-${data.id}`;
+        const dataId = `error-data-${data.id}`;
+
+        return `
+            <div class="header">
+                <h2>❌ ${escapeHtml(errorType)}</h2>
+                <div class="timestamp">⏱️  ${new Date(data.timestamp).toLocaleString()}</div>
+                ${duration ? `<div class="timestamp">⏱️  Duration: ${duration}</div>` : ''}
+                ${stepName ? `<div class="timestamp">📍 Step: ${escapeHtml(stepName)}</div>` : ''}
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Error Message</div>
+                    <div class="actions">
+                        <button class="btn btn-copy" data-target="${errorId}">📋 Copy</button>
+                    </div>
+                </div>
+                <div class="code-block status-error" id="${errorId}">${escapeHtml(error)}</div>
+            </div>
+
+            ${errorDetails ? `
+            <div class="section">
+                <div class="section-title">Error Details</div>
+                <div class="code-block">${escapeHtml(errorDetails)}</div>
+            </div>
+            ` : ''}
+
+            ${stackTrace ? `
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Stack Trace</div>
+                    <div class="actions">
+                        <button class="btn btn-copy" data-target="${stackId}">📋 Copy</button>
+                    </div>
+                </div>
+                <details open>
+                    <summary>Stack Trace</summary>
+                    <div class="code-block" id="${stackId}">${escapeHtml(stackTrace)}</div>
+                </details>
+            </div>
+            ` : ''}
+
+            ${data.data ? `
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-title">Full Error Data</div>
+                    <div class="actions">
+                        <button class="btn btn-copy" data-target="${dataId}">📋 Copy</button>
+                        <button class="btn btn-open-tab" data-target="${dataId}" data-title="Error Data">📄 Open in Tab</button>
+                    </div>
+                </div>
+                <details>
+                    <summary>Complete Error Information</summary>
+                    <div class="code-block" id="${dataId}">${escapeHtml(JSON.stringify(data.data, null, 2))}</div>
+                </details>
+            </div>
+            ` : ''}
         `;
     }
 

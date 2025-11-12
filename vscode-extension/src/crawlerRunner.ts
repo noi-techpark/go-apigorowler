@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as cp from 'child_process';
 import * as path from 'path';
-import { StepsTreeProvider, StepProfilerData } from './stepsTreeProvider';
+import { StepsTreeProvider, StepProfilerData, ProfileEventType } from './stepsTreeProvider';
 import { TimelineViewProvider } from './timelineViewProvider';
 
 export class CrawlerRunner {
@@ -250,28 +250,11 @@ export class CrawlerRunner {
         // Handle RESULT: prefix
         if (trimmed.startsWith('RESULT:')) {
             const jsonStr = trimmed.substring(7).trim();
-            try {
-                const result = JSON.parse(jsonStr);
-                this.outputChannel.appendLine('\n=== Final Result ===');
-                this.outputChannel.appendLine(JSON.stringify(result, null, 2));
-                return true;
-            } catch (e) {
-                this.outputChannel.appendLine(`Failed to parse result: ${e}`);
-                return false;
-            }
         }
 
         // Handle STREAM: prefix
         if (trimmed.startsWith('STREAM:')) {
             const jsonStr = trimmed.substring(7).trim();
-            try {
-                const entity = JSON.parse(jsonStr);
-                this.outputChannel.appendLine(`Stream entity: ${JSON.stringify(entity)}`);
-                return true;
-            } catch (e) {
-                this.outputChannel.appendLine(`Failed to parse stream entity: ${e}`);
-                return false;
-            }
         }
 
         // Handle profiler data (plain JSON)
@@ -284,7 +267,7 @@ export class CrawlerRunner {
 
             // Verify it looks like profiler data by checking for type field
             // ProfileEventType range is 0-17 (18 total event types)
-            if (data.type !== undefined && data.type >= 0 && data.type <= 17) {
+            if (data.type !== undefined && data.type >= 0 && data.type <= ProfileEventType.EVENT_MAX_NUM) {
                 this.outputChannel.appendLine(`[DEBUG] Adding step: type=${data.type}, name=${data.name}`);
                 this.stepsProvider.addStep(data);
                 const rootSteps = this.stepsProvider.getSteps();

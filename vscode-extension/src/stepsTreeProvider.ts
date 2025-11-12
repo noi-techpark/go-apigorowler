@@ -43,9 +43,23 @@ export const ProfileEventType = {
     EVENT_PARALLELISM_SETUP: 14,
     EVENT_ITEM_SELECTION: 15,
 
+    // Authentication events
+    EVENT_AUTH_START: 16,
+    EVENT_AUTH_CACHED: 17,
+    EVENT_AUTH_LOGIN_START: 18,
+    EVENT_AUTH_LOGIN_END: 19,
+    EVENT_AUTH_TOKEN_EXTRACT: 20,
+    EVENT_AUTH_TOKEN_INJECT: 21,
+    EVENT_AUTH_END: 22,
+
     // Result events
-    EVENT_RESULT: 16,
-    EVENT_STREAM_RESULT: 17
+    EVENT_RESULT: 23,
+    EVENT_STREAM_RESULT: 24,
+
+    // Errors
+    EVENT_ERROR: 25,
+
+    EVENT_MAX_NUM: 25
 } as const;
 
 export class StepTreeItem extends vscode.TreeItem {
@@ -139,8 +153,16 @@ export class StepTreeItem extends vscode.TreeItem {
             [ProfileEventType.EVENT_FOREACH_STEP_END]: 'ForEach Step End',
             [ProfileEventType.EVENT_PARALLELISM_SETUP]: 'Parallelism Setup',
             [ProfileEventType.EVENT_ITEM_SELECTION]: 'Item Selection',
+            [ProfileEventType.EVENT_AUTH_START]: 'Auth Start',
+            [ProfileEventType.EVENT_AUTH_CACHED]: 'Auth Cached',
+            [ProfileEventType.EVENT_AUTH_LOGIN_START]: 'Auth Login',
+            [ProfileEventType.EVENT_AUTH_LOGIN_END]: 'Auth Login End',
+            [ProfileEventType.EVENT_AUTH_TOKEN_EXTRACT]: 'Token Extract',
+            [ProfileEventType.EVENT_AUTH_TOKEN_INJECT]: 'Token Inject',
+            [ProfileEventType.EVENT_AUTH_END]: 'Auth End',
             [ProfileEventType.EVENT_RESULT]: 'Final Result',
-            [ProfileEventType.EVENT_STREAM_RESULT]: 'Stream Result'
+            [ProfileEventType.EVENT_STREAM_RESULT]: 'Stream Result',
+            [ProfileEventType.EVENT_ERROR]: 'Error'
         };
 
         return eventNames[this.data.type] || `Unknown Event (${this.data.type})`;
@@ -191,9 +213,29 @@ export class StepTreeItem extends vscode.TreeItem {
             case ProfileEventType.EVENT_ITEM_SELECTION:
                 return new vscode.ThemeIcon('symbol-event');
 
+            case ProfileEventType.EVENT_AUTH_START:
+            case ProfileEventType.EVENT_AUTH_END:
+                return new vscode.ThemeIcon('shield');
+
+            case ProfileEventType.EVENT_AUTH_CACHED:
+                return new vscode.ThemeIcon('database');
+
+            case ProfileEventType.EVENT_AUTH_LOGIN_START:
+            case ProfileEventType.EVENT_AUTH_LOGIN_END:
+                return new vscode.ThemeIcon('sign-in');
+
+            case ProfileEventType.EVENT_AUTH_TOKEN_EXTRACT:
+                return new vscode.ThemeIcon('key');
+
+            case ProfileEventType.EVENT_AUTH_TOKEN_INJECT:
+                return new vscode.ThemeIcon('arrow-small-right');
+
             case ProfileEventType.EVENT_RESULT:
             case ProfileEventType.EVENT_STREAM_RESULT:
                 return new vscode.ThemeIcon('check');
+
+            case ProfileEventType.EVENT_ERROR:
+                return new vscode.ThemeIcon('error');
 
             default:
                 return new vscode.ThemeIcon('circle-outline');
@@ -277,6 +319,8 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
         // Handle END events - enrich the corresponding START event with duration
         if (eventType === ProfileEventType.EVENT_REQUEST_STEP_END ||
             eventType === ProfileEventType.EVENT_FOREACH_STEP_END ||
+            eventType === ProfileEventType.EVENT_AUTH_LOGIN_END ||
+            eventType === ProfileEventType.EVENT_AUTH_END ||
             eventType === ProfileEventType.EVENT_REQUEST_PAGE_END) {
 
             // Find the corresponding START event by ID
@@ -313,6 +357,8 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
             eventType === ProfileEventType.EVENT_REQUEST_STEP_START ||
             eventType === ProfileEventType.EVENT_FOREACH_STEP_START ||
             eventType === ProfileEventType.EVENT_REQUEST_PAGE_START ||
+            eventType === ProfileEventType.EVENT_AUTH_START ||
+            eventType === ProfileEventType.EVENT_AUTH_LOGIN_START ||
             eventType === ProfileEventType.EVENT_ITEM_SELECTION) {
             collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
         }
@@ -326,6 +372,8 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
         // Track START events for later enrichment
         if (eventType === ProfileEventType.EVENT_REQUEST_STEP_START ||
             eventType === ProfileEventType.EVENT_FOREACH_STEP_START ||
+            eventType === ProfileEventType.EVENT_AUTH_START ||
+            eventType === ProfileEventType.EVENT_AUTH_LOGIN_START ||
             eventType === ProfileEventType.EVENT_REQUEST_PAGE_START) {
             this.pendingStartEvents.set(profilerData.id, newItem);
         }
@@ -379,6 +427,20 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
                 return `Parallel (${data.data?.maxConcurrency || '?'} workers)`;
             case ProfileEventType.EVENT_ITEM_SELECTION:
                 return `Item ${data.data?.iterationIndex ?? '?'}`;
+            case ProfileEventType.EVENT_AUTH_START:
+                return `Auth: ${data.data?.authType || 'unknown'}`;
+            case ProfileEventType.EVENT_AUTH_CACHED:
+                return `Cached Token`;
+            case ProfileEventType.EVENT_AUTH_LOGIN_START:
+                return `Login Request`;
+            case ProfileEventType.EVENT_AUTH_LOGIN_END:
+                return `Login ${data.data?.error ? 'Failed' : 'Complete'}`;
+            case ProfileEventType.EVENT_AUTH_TOKEN_EXTRACT:
+                return `Extract Token`;
+            case ProfileEventType.EVENT_AUTH_TOKEN_INJECT:
+                return `Inject Token`;
+            case ProfileEventType.EVENT_AUTH_END:
+                return `Auth Complete`;
             case ProfileEventType.EVENT_RESULT:
                 return 'Final Result';
             case ProfileEventType.EVENT_STREAM_RESULT:
@@ -444,6 +506,13 @@ export class StepsTreeProvider implements vscode.TreeDataProvider<StepTreeItem> 
             [ProfileEventType.EVENT_FOREACH_STEP_END]: 'ForEach Step End',
             [ProfileEventType.EVENT_PARALLELISM_SETUP]: 'Parallelism Setup',
             [ProfileEventType.EVENT_ITEM_SELECTION]: 'Item Selection',
+            [ProfileEventType.EVENT_AUTH_START]: 'Auth Start',
+            [ProfileEventType.EVENT_AUTH_CACHED]: 'Auth Cached',
+            [ProfileEventType.EVENT_AUTH_LOGIN_START]: 'Auth Login',
+            [ProfileEventType.EVENT_AUTH_LOGIN_END]: 'Auth Login End',
+            [ProfileEventType.EVENT_AUTH_TOKEN_EXTRACT]: 'Token Extract',
+            [ProfileEventType.EVENT_AUTH_TOKEN_INJECT]: 'Token Inject',
+            [ProfileEventType.EVENT_AUTH_END]: 'Auth End',
             [ProfileEventType.EVENT_RESULT]: 'Final Result',
             [ProfileEventType.EVENT_STREAM_RESULT]: 'Stream Result'
         };
