@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,24 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
+
+// getContentType retrieves the Content-Type from headers (case-insensitive)
+func getContentType(headers map[string]string) string {
+	if headers == nil {
+		return ""
+	}
+	// Check for exact match first
+	if ct, ok := headers["Content-Type"]; ok {
+		return ct
+	}
+	// Case-insensitive search
+	for key, value := range headers {
+		if strings.ToLower(key) == "content-type" {
+			return value
+		}
+	}
+	return ""
+}
 
 type Authenticator interface {
 	PrepareRequest(req *http.Request) error
@@ -283,7 +302,7 @@ func (a *CookieAuthenticator) buildLoginRequest() (*http.Request, error) {
 		req.Header.Set(k, v)
 	}
 	if bodyReader != nil {
-		contentType := a.loginRequest.ContentType
+		contentType := getContentType(a.loginRequest.Headers)
 		if contentType == "" {
 			contentType = "application/json"
 		}
@@ -460,7 +479,7 @@ func (a *JWTAuthenticator) buildLoginRequest() (*http.Request, error) {
 		req.Header.Set(k, v)
 	}
 	if bodyReader != nil {
-		contentType := a.loginRequest.ContentType
+		contentType := getContentType(a.loginRequest.Headers)
 		if contentType == "" {
 			contentType = "application/json"
 		}
@@ -677,7 +696,7 @@ func (a *CustomAuthenticator) buildLoginRequest() (*http.Request, error) {
 		req.Header.Set(k, v)
 	}
 	if bodyReader != nil {
-		contentType := a.loginRequest.ContentType
+		contentType := getContentType(a.loginRequest.Headers)
 		if contentType == "" {
 			contentType = "application/json"
 		}

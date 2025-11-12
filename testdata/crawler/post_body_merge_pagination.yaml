@@ -7,11 +7,12 @@ steps:
     request:
       url: https://api.example.com/search
       method: POST
+      headers:
+        Content-Type: application/json
       body:
         query: "golang"
         filters:
           category: "programming"
-      contentType: application/json
       pagination:
         stopOn:
           - type: pageNum

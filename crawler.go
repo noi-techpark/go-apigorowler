@@ -244,7 +244,6 @@ type RequestConfig struct {
 	Method         string               `yaml:"method" json:"method"`
 	Headers        map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
 	Body           map[string]any       `yaml:"body,omitempty" json:"body,omitempty"`
-	ContentType    string               `yaml:"contentType,omitempty" json:"contentType,omitempty"`
 	Pagination     Pagination           `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	Authentication *AuthenticatorConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
 }
@@ -639,7 +638,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			headers:        exec.step.Request.Headers,
 			configuredBody: exec.step.Request.Body,
 			bodyParams:     next.BodyParams,
-			contentType:    exec.step.Request.ContentType,
+			contentType:    getContentType(exec.step.Request.Headers),
 			queryParams:    next.QueryParams,
 			nextPageURL:    next.NextPageUrl,
 			authenticator:  authenticator,

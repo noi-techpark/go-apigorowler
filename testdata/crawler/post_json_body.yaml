@@ -7,8 +7,9 @@ steps:
     request:
       url: https://api.example.com/users
       method: POST
+      headers:
+        Content-Type: application/json
       body:
         username: testuser
         email: test@example.com
-      contentType: application/json
     mergeOn: .results += [$res]
