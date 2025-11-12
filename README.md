@@ -271,7 +271,6 @@ Cookie-based authentication - performs login request, extracts cookie, and injec
 | `loginRequest`  | [RequestConfig](#requeststruct)  | Yes      | Login request configuration              |
 | `extractSelector` | string                         | Yes      | Cookie name to extract                   |
 | `maxAgeSeconds` | int                              | Optional | Token refresh interval (0 = no refresh) |
-| `onePerRun`     | bool                             | Optional | If true, authenticate once per crawler run |
 
 **Example:**
 ```yaml
@@ -299,7 +298,6 @@ JWT authentication - performs login request, extracts JWT from response, and inj
 | `extractFrom`     | string                          | Optional | `header` or `body` (default: `body`)         |
 | `extractSelector` | string                          | Yes      | Header name or jq expression for token       |
 | `maxAgeSeconds`   | int                             | Optional | Token refresh interval (0 = no refresh)     |
-| `onePerRun`       | bool                            | Optional | If true, authenticate once per crawler run   |
 
 **Example (Extract from Body):**
 ```yaml
@@ -332,7 +330,6 @@ auth:
       password: mypass
   extractFrom: header
   extractSelector: X-Auth-Token
-  onePerRun: true
 ```
 
 #### Type: `custom`
@@ -347,7 +344,6 @@ Fully customizable authentication - specify where to extract credentials and whe
 | `injectInto`      | string                          | Yes      | `cookie`, `header`, `bearer`, `query`, or `body`  |
 | `injectKey`       | string                          | If not bearer | Cookie/header/query/body field name          |
 | `maxAgeSeconds`   | int                             | Optional | Token refresh interval (0 = no refresh)          |
-| `onePerRun`       | bool                            | Optional | If true, authenticate once per crawler run        |
 
 **Example (Cookie to Custom Header):**
 ```yaml
@@ -365,7 +361,6 @@ auth:
   extractSelector: auth_cookie
   injectInto: header
   injectKey: X-Custom-Auth
-  onePerRun: true
 ```
 
 **Example (Body JSON to Query Parameter):**
@@ -718,5 +713,5 @@ These files provide practical, ready-to-use examples for common crawling pattern
 
 ## Debug & development
 ```bash
-cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2
+(cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2)
 ```

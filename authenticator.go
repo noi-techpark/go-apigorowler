@@ -169,8 +169,7 @@ type AuthenticatorConfig struct {
 	InjectKey       string         `yaml:"injectKey,omitempty" json:"injectKey,omitempty"`             // name for cookie/header/query/body field
 
 	// Refresh settings
-	MaxAgeSeconds int  `yaml:"maxAgeSeconds,omitempty" json:"maxAgeSeconds,omitempty"` // 0 = no refresh
-	OnePerRun     bool `yaml:"onePerRun,omitempty" json:"onePerRun,omitempty"`
+	MaxAgeSeconds int `yaml:"maxAgeSeconds,omitempty" json:"maxAgeSeconds,omitempty"` // 0 = no refresh
 }
 
 // BasicAuthenticator - HTTP Basic Authentication
@@ -371,7 +370,6 @@ type CookieAuthenticator struct {
 	cookie        *http.Cookie
 	maxAge        time.Duration
 	acquiredAt    time.Time
-	onePerRun     bool
 	authenticated bool
 	mu            sync.Mutex
 	httpClient    HTTPClient
@@ -387,7 +385,7 @@ func (a *CookieAuthenticator) PrepareRequest(req *http.Request, requestID string
 
 	// Check if we need to authenticate
 	needsAuth := false
-	if !a.authenticated || (a.cookie == nil && !a.onePerRun) {
+	if !a.authenticated {
 		needsAuth = true
 	} else if a.maxAge > 0 && time.Since(a.acquiredAt) > a.maxAge {
 		needsAuth = true
@@ -522,7 +520,6 @@ type JWTAuthenticator struct {
 	token           string
 	maxAge          time.Duration
 	acquiredAt      time.Time
-	onePerRun       bool
 	authenticated   bool
 	mu              sync.Mutex
 	httpClient      HTTPClient
@@ -539,7 +536,7 @@ func (a *JWTAuthenticator) PrepareRequest(req *http.Request, requestID string) e
 
 	// Check if we need to authenticate
 	needsAuth := false
-	if !a.authenticated || (a.token == "" && !a.onePerRun) {
+	if !a.authenticated {
 		needsAuth = true
 	} else if a.maxAge > 0 && time.Since(a.acquiredAt) > a.maxAge {
 		needsAuth = true
@@ -736,7 +733,6 @@ type CustomAuthenticator struct {
 	cookie          *http.Cookie
 	maxAge          time.Duration
 	acquiredAt      time.Time
-	onePerRun       bool
 	authenticated   bool
 	mu              sync.Mutex
 	httpClient      HTTPClient
@@ -758,7 +754,7 @@ func (a *CustomAuthenticator) PrepareRequest(req *http.Request, requestID string
 	needsAuth := false
 	if !a.authenticated {
 		needsAuth = true
-	} else if !a.onePerRun && a.maxAge > 0 && time.Since(a.acquiredAt) > a.maxAge {
+	} else if a.maxAge > 0 && time.Since(a.acquiredAt) > a.maxAge {
 		needsAuth = true
 	}
 
@@ -1086,7 +1082,6 @@ func NewAuthenticator(config AuthenticatorConfig, httpClient HTTPClient) Authent
 			loginRequest: config.LoginRequest,
 			cookieName:   config.ExtractSelector,
 			maxAge:       maxAge,
-			onePerRun:    config.OnePerRun,
 			httpClient:   httpClient,
 			BaseAuthenticator: &BaseAuthenticator{
 				profiler: &AuthProfiler{authType: "cookie"},
@@ -1104,7 +1099,6 @@ func NewAuthenticator(config AuthenticatorConfig, httpClient HTTPClient) Authent
 			extractFrom:     extractFrom,
 			extractSelector: config.ExtractSelector,
 			maxAge:          maxAge,
-			onePerRun:       config.OnePerRun,
 			httpClient:      httpClient,
 			jqCache:         make(map[string]*gojq.Code),
 			BaseAuthenticator: &BaseAuthenticator{
@@ -1121,7 +1115,6 @@ func NewAuthenticator(config AuthenticatorConfig, httpClient HTTPClient) Authent
 			injectInto:      config.InjectInto,
 			injectKey:       config.InjectKey,
 			maxAge:          maxAge,
-			onePerRun:       config.OnePerRun,
 			httpClient:      httpClient,
 			jqCache:         make(map[string]*gojq.Code),
 			BaseAuthenticator: &BaseAuthenticator{

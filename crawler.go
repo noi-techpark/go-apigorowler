@@ -383,16 +383,6 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 		c.DataStream = make(chan any)
 	}
 
-	// instantiate global authenticator
-	if cfg.Authentication != nil {
-		c.globalAuthenticator = NewAuthenticator(*cfg.Authentication, c.httpClient)
-	} else {
-		c.globalAuthenticator = NoopAuthenticator{
-			BaseAuthenticator: &BaseAuthenticator{
-				profiler: &AuthProfiler{authType: "cookie"},
-			},
-		}
-	}
 	return c, nil, nil
 }
 
@@ -551,6 +541,17 @@ func newStepExecution(step Step, currentContextKey string, contextMap map[string
 }
 
 func (c *ApiCrawler) Run(ctx context.Context) error {
+	// instantiate global authenticator at Run time so we force the authenticator to refresh
+	if c.Config.Authentication != nil {
+		c.globalAuthenticator = NewAuthenticator(*c.Config.Authentication, c.httpClient)
+	} else {
+		c.globalAuthenticator = NoopAuthenticator{
+			BaseAuthenticator: &BaseAuthenticator{
+				profiler: &AuthProfiler{authType: "cookie"},
+			},
+		}
+	}
+
 	rootCtx := &Context{
 		Data:          c.Config.RootContext,
 		ParentContext: "",

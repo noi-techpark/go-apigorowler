@@ -125,47 +125,6 @@ func TestCookieAuthenticator(t *testing.T) {
 	assert.Equal(t, "session_id", cookies2[0].Name)
 }
 
-func TestCookieAuthenticatorOnePerRun(t *testing.T) {
-	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/login": "testdata/auth/cookie_login_response.json",
-	})
-
-	loginCount := 0
-	mockTransport.InterceptFunc = func(req *http.Request, resp *http.Response) {
-		if req.URL.Path == "/login" {
-			loginCount++
-			cookie := &http.Cookie{
-				Name:  "session_id",
-				Value: "abc123xyz",
-			}
-			resp.Header.Add("Set-Cookie", cookie.String())
-		}
-	}
-
-	client := &http.Client{Transport: mockTransport}
-
-	config := AuthenticatorConfig{
-		Type: "cookie",
-		LoginRequest: &RequestConfig{
-			URL:    "https://api.example.com/login",
-			Method: "POST",
-		},
-		ExtractSelector: "session_id",
-		OnePerRun:       true,
-	}
-
-	auth := NewAuthenticator(config, client)
-
-	// Multiple requests should only login once
-	for i := 0; i < 3; i++ {
-		req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-		err := auth.PrepareRequest(req, "")
-		require.Nil(t, err)
-	}
-
-	assert.Equal(t, 1, loginCount, "Should only login once with onePerRun=true")
-}
-
 func TestJWTAuthenticatorFromBody(t *testing.T) {
 	// Create login response with JWT in body
 	loginResponse := map[string]interface{}{
@@ -228,7 +187,6 @@ func TestJWTAuthenticatorFromHeader(t *testing.T) {
 		},
 		ExtractFrom:     "header",
 		ExtractSelector: "X-Auth-Token",
-		OnePerRun:       true,
 	}
 
 	auth := NewAuthenticator(config, client)
@@ -332,7 +290,6 @@ func TestCustomAuthenticatorCookieToHeader(t *testing.T) {
 		ExtractSelector: "auth_cookie",
 		InjectInto:      "header",
 		InjectKey:       "X-Custom-Auth",
-		OnePerRun:       true,
 	}
 
 	auth := NewAuthenticator(config, client)
@@ -367,7 +324,6 @@ func TestCustomAuthenticatorBodyToquery(t *testing.T) {
 		ExtractSelector: ".access_token",
 		InjectInto:      "query",
 		InjectKey:       "api_key",
-		OnePerRun:       true,
 	}
 
 	auth := NewAuthenticator(config, client)
@@ -402,7 +358,6 @@ func TestCustomAuthenticatorHeaderToBearer(t *testing.T) {
 		ExtractFrom:     "header",
 		ExtractSelector: "Authorization",
 		InjectInto:      "bearer",
-		OnePerRun:       true,
 	}
 
 	auth := NewAuthenticator(config, client)
