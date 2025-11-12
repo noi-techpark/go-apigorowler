@@ -66,15 +66,34 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 	var errs []ValidationError
 
 	t := strings.ToLower(auth.Type)
-	if t != "basic" && t != "bearer" && t != "oauth" {
-		errs = append(errs, ValidationError{fmt.Sprintf("auth.type must be one of [basic, bearer, oauth], got '%s'", auth.Type), location + ".type"})
+	validTypes := []string{"basic", "bearer", "oauth", "cookie", "jwt", "custom"}
+	isValidType := false
+	for _, vt := range validTypes {
+		if t == vt {
+			isValidType = true
+			break
+		}
+	}
+	if !isValidType {
+		errs = append(errs, ValidationError{fmt.Sprintf("auth.type must be one of [basic, bearer, oauth, cookie, jwt, custom], got '%s'", auth.Type), location + ".type"})
+		return errs
 	}
 
-	if t == "bearer" && auth.Token == "" {
-		errs = append(errs, ValidationError{"auth.token is required when type is bearer", location + ".token"})
-	}
+	switch t {
+	case "basic":
+		if auth.Username == "" {
+			errs = append(errs, ValidationError{"auth.username is required when type is basic", location + ".username"})
+		}
+		if auth.Password == "" {
+			errs = append(errs, ValidationError{"auth.password is required when type is basic", location + ".password"})
+		}
 
-	if t == "oauth" {
+	case "bearer":
+		if auth.Token == "" {
+			errs = append(errs, ValidationError{"auth.token is required when type is bearer", location + ".token"})
+		}
+
+	case "oauth":
 		if auth.Method == "" {
 			errs = append(errs, ValidationError{"auth.method is required when type is oauth", location + ".method"})
 		} else if auth.Method != "password" && auth.Method != "client_credentials" {
@@ -101,14 +120,51 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 				errs = append(errs, ValidationError{"auth.password is required when method is password", location + ".password"})
 			}
 		}
-	}
 
-	if t == "basic" {
-		if auth.Username == "" {
-			errs = append(errs, ValidationError{"auth.username is required when type is basic", location + ".username"})
+	case "cookie":
+		if auth.LoginRequest == nil {
+			errs = append(errs, ValidationError{"auth.loginRequest is required when type is cookie", location + ".loginRequest"})
+		} else {
+			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
 		}
-		if auth.Password == "" {
-			errs = append(errs, ValidationError{"auth.password is required when type is basic", location + ".password"})
+		if auth.ExtractSelector == "" {
+			errs = append(errs, ValidationError{"auth.extractSelector is required when type is cookie", location + ".extractSelector"})
+		}
+
+	case "jwt":
+		if auth.LoginRequest == nil {
+			errs = append(errs, ValidationError{"auth.loginRequest is required when type is jwt", location + ".loginRequest"})
+		} else {
+			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+		}
+		if auth.ExtractSelector == "" {
+			errs = append(errs, ValidationError{"auth.extractSelector is required when type is jwt", location + ".extractSelector"})
+		}
+		if auth.ExtractFrom != "" && auth.ExtractFrom != "header" && auth.ExtractFrom != "body" {
+			errs = append(errs, ValidationError{"auth.extractFrom must be 'header' or 'body' when specified", location + ".extractFrom"})
+		}
+
+	case "custom":
+		if auth.LoginRequest == nil {
+			errs = append(errs, ValidationError{"auth.loginRequest is required when type is custom", location + ".loginRequest"})
+		} else {
+			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+		}
+		if auth.ExtractFrom == "" {
+			errs = append(errs, ValidationError{"auth.extractFrom is required when type is custom", location + ".extractFrom"})
+		} else if auth.ExtractFrom != "cookie" && auth.ExtractFrom != "header" && auth.ExtractFrom != "body" {
+			errs = append(errs, ValidationError{"auth.extractFrom must be 'cookie', 'header', or 'body'", location + ".extractFrom"})
+		}
+		if auth.ExtractSelector == "" {
+			errs = append(errs, ValidationError{"auth.extractSelector is required when type is custom", location + ".extractSelector"})
+		}
+		if auth.InjectInto == "" {
+			errs = append(errs, ValidationError{"auth.injectInto is required when type is custom", location + ".injectInto"})
+		} else if auth.InjectInto != "cookie" && auth.InjectInto != "header" && auth.InjectInto != "bearer" && auth.InjectInto != "query" && auth.InjectInto != "body" {
+			errs = append(errs, ValidationError{"auth.injectInto must be one of [cookie, header, bearer, query, body]", location + ".injectInto"})
+		}
+		if auth.InjectInto != "bearer" && auth.InjectKey == "" {
+			errs = append(errs, ValidationError{"auth.injectKey is required when injectInto is not 'bearer'", location + ".injectKey"})
 		}
 	}
 
