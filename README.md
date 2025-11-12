@@ -7,7 +7,7 @@ The core functionality of ApiGorowler revolves around two main step types:
 * `request`: to perform API calls,
 * `foreach`: to iterate over arrays and dynamically create nested contexts.
 
-Each step operates in its own **context**, allowing for precise manipulation and isolation of data. Contexts are pushed onto a stack, especially by `foreach` steps, enabling fine-grained control of nested operations. After execution, contexts can be merged into parent or ancestor contexts using declarative **merge rules**.
+Each step operates in its own **context**, allowing for precise manipulation and isolation of data. Contexts are organized in a hierarchical structure, with each `foreach` step creating new child contexts. This enables fine-grained control of nested operations and data scoping. After execution, results can be merged into parent or ancestor contexts using declarative **merge rules**.
 
 ApiGorowler also supports:
 
@@ -15,8 +15,9 @@ ApiGorowler also supports:
 * Response transformation via `jq` expressions
 * Request templating with Go templates
 * Global and request-level authentication and headers
-* Multiple authentication mechanisms: OAuth2 (with password and client\_credentials flows), Bearer tokens, and Basic auth
+* Multiple authentication mechanisms: OAuth2 (password and client_credentials flows), Bearer tokens, Basic auth, Cookie-based auth, JWT auth, and fully customizable authentication
 * Streaming of top-level entities when operating on array-based root contexts
+* Parallel execution of `forEach` iterations with configurable concurrency and rate limiting
 
 To simplify development, ApiGorowler includes a **configuration builder CLI tool**, written in Go, that enables real-time execution and inspection of the configuration. This tool helps developers debug and refine their manifests by visualizing intermediate steps.
 
@@ -31,11 +32,48 @@ The library comes with a [developer IDE](cmd/ide/) which helps in building, debu
 
 * Declarative configuration using YAML
 * Supports nested data traversal and merging
-* Powerful context stack system for scoped operations
+* Powerful context hierarchy system for scoped operations
 * Built-in support for `jq` and Go templates
-* Multiple authentication types (OAuth2, Basic, Bearer)
+* Multiple authentication types (OAuth2, Basic, Bearer, Cookie, JWT, Custom)
+* Parallel execution support for forEach steps with rate limiting
 * Config builder with live evaluation and inspection
 * Streaming support for root-level arrays
+
+---
+
+## Context System
+
+ApiGorowler's context system is the foundation of its data processing capabilities. Understanding how contexts work is essential for building effective crawl configurations.
+
+### Context Hierarchy
+
+When the crawler starts, it initializes a **root context** containing the initial data structure (either an empty array `[]` or empty object `{}`). As steps execute:
+
+1. **Request steps** can create a temporary child context when they have nested steps (using the `as` parameter)
+2. **ForEach steps** create a new child context for each iteration, containing the current item being processed
+3. Each context has a unique key and maintains a reference to its parent context
+4. Nested steps operate on the current context, isolated from parent contexts
+
+### Context Variables
+
+Within templates and `jq` expressions, you can reference:
+
+* **Named contexts**: When a step uses `as: "name"`, that context becomes accessible as `.name` in Go templates
+* **Special variable `$res`**: In merge rules, refers to the result being merged
+* **Special variable `$ctx`**: In transform and merge rules, provides access to the full context map
+* **Parent context data**: When merged, child results update parent context data
+
+### Merge Strategies
+
+After a step executes, its result can be merged back into a context using several strategies:
+
+* **`mergeOn`**: Merge with current context using a jq expression (e.g., `.items = $res`)
+* **`mergeWithParentOn`**: Merge with immediate parent context using a jq expression
+* **`mergeWithContext`**: Merge with a named ancestor context (e.g., `{name: "facility", rule: ".details = $res"}`)
+* **`noopMerge: true`**: Skip merging entirely (useful when nested steps handle their own merging)
+* **Default**: If no merge option is specified, arrays are appended and objects are shallow-merged
+
+These options are mutually exclusive - only one can be specified per step.
 
 ---
 
@@ -45,7 +83,7 @@ The configuration
 
 ```yaml
 rootContext: []
-  
+
 steps:
   - type: request
     name: Fetch Facilities
@@ -111,23 +149,23 @@ rootContext: []
 └── Request: Fetch Facilities
     (result is filtered list of Facilities)
     │
-    └── Foreach: facility in [.]
-        (new context per facility)
+    └── ForEach: facility in [.]
+        (new child context per facility)
         │
         ├── Request: Get Facility Free Places
-        │   (adds .FacilityDetails to ancestor context via mergeOn)
+        │   (merges .FacilityDetails into facility context via mergeOn)
         │
-        └── Foreach: sub in .subFacilities
-            (new context per sub-facility)
+        └── ForEach: sub in .subFacilities
+            (new child context per sub-facility)
             │
             ├── Request: Get SubFacility Free Places
-            │   (adds .SubFacilityDetails to ancestor context via mergeOn)
+            │   (merges .SubFacilityDetails into sub context via mergeOn)
             │
-            └── Foreach: loc in .locations
-                (new context per location ID)
+            └── ForEach: loc in .locations
+                (new child context per location ID)
                 │
                 └── Request: Get Location Details
-                    (merges $res into sub context under .locationDetails via mergeWithContext)
+                    (merges into sub context under .locationDetails via mergeWithContext)
 ```
 
 -----
@@ -140,7 +178,7 @@ rootContext: []
 | ------------- | ---------------------- | -------------------------------------------------------------- |
 | `rootContext` | `[]` or `{}`           | **Required.** Initial context for the crawler.                 |
 | `auth`        | [AuthenticationStruct](#authenticationstruct) | Optional. Global authentication configuration.                 |
-| `headers`     | `map[string]string`    | Optional. Global headers.                                      |
+| `headers`     | `map[string]string`    | Optional. Global headers applied to all requests.              |
 | `stream`      | `boolean`              | Optional. Enable streaming; requires `rootContext` to be `[]`. |
 | `steps`       | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | **Required.** List of crawler steps. |
 
@@ -148,20 +186,209 @@ rootContext: []
 
 ### AuthenticationStruct
 
-| Field          | Type   | Required When                                                |
-| -------------- | ------ | ------------------------------------------------------------ |
-| `type`         | string | Always. One of: `basic`, `bearer`, `oauth`                   |
-| `token`        | string | If `type == bearer`                                          |
-| `method`       | string | If `type == oauth`. One of: `password`, `client_credentials` |
-| `tokenUrl`     | string | If `type == oauth`                                           |
-| `clientId`     | string | If `type == oauth && method == client_credentials`           |
-| `clientSecret` | string | If `type == oauth && method == client_credentials`           |
-| `username`     | string | If `type == basic` or `type == oauth && method == password`  |
-| `password`     | string | If `type == basic` or `type == oauth && method == password`  |
+ApiGorowler supports multiple authentication mechanisms to handle diverse API authentication patterns.
+
+#### Common Fields
+
+| Field          | Type   | Description                                                              |
+| -------------- | ------ | ------------------------------------------------------------------------ |
+| `type`         | string | **Required.** One of: `basic`, `bearer`, `oauth`, `cookie`, `jwt`, `custom` |
+
+#### Type: `basic`
+
+HTTP Basic Authentication.
+
+| Field      | Type   | Required | Description          |
+| ---------- | ------ | -------- | -------------------- |
+| `username` | string | Yes      | Basic auth username  |
+| `password` | string | Yes      | Basic auth password  |
+
+**Example:**
+```yaml
+auth:
+  type: basic
+  username: myuser
+  password: mypassword
+```
+
+#### Type: `bearer`
+
+Bearer token authentication.
+
+| Field   | Type   | Required | Description   |
+| ------- | ------ | -------- | ------------- |
+| `token` | string | Yes      | Bearer token  |
+
+**Example:**
+```yaml
+auth:
+  type: bearer
+  token: my-api-token-123
+```
+
+#### Type: `oauth`
+
+OAuth2 authentication with password or client credentials flow.
+
+| Field          | Type     | Required When                                    | Description                       |
+| -------------- | -------- | ------------------------------------------------ | --------------------------------- |
+| `method`       | string   | Always                                           | `password` or `client_credentials`|
+| `tokenUrl`     | string   | Always                                           | OAuth2 token endpoint URL         |
+| `clientId`     | string   | If `method == client_credentials`                | OAuth2 client ID                  |
+| `clientSecret` | string   | If `method == client_credentials`                | OAuth2 client secret              |
+| `username`     | string   | If `method == password`                          | User username                     |
+| `password`     | string   | If `method == password`                          | User password                     |
+| `scopes`       | []string | Optional                                         | OAuth2 scopes                     |
+
+**Example (Client Credentials):**
+```yaml
+auth:
+  type: oauth
+  method: client_credentials
+  tokenUrl: https://api.example.com/oauth/token
+  clientId: my-client-id
+  clientSecret: my-client-secret
+  scopes: [read, write]
+```
+
+**Example (Password Flow):**
+```yaml
+auth:
+  type: oauth
+  method: password
+  tokenUrl: https://api.example.com/oauth/token
+  username: user@example.com
+  password: userpass
+  scopes: [api]
+```
+
+#### Type: `cookie`
+
+Cookie-based authentication - performs login request, extracts cookie, and injects it in subsequent requests.
+
+| Field           | Type                             | Required | Description                              |
+| --------------- | -------------------------------- | -------- | ---------------------------------------- |
+| `loginRequest`  | [RequestConfig](#requeststruct)  | Yes      | Login request configuration              |
+| `extractSelector` | string                         | Yes      | Cookie name to extract                   |
+| `maxAgeSeconds` | int                              | Optional | Token refresh interval (0 = no refresh) |
+| `onePerRun`     | bool                             | Optional | If true, authenticate once per crawler run |
+
+**Example:**
+```yaml
+auth:
+  type: cookie
+  loginRequest:
+    url: https://api.example.com/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      username: myuser
+      password: mypass
+  extractSelector: session_id
+  maxAgeSeconds: 3600
+```
+
+#### Type: `jwt`
+
+JWT authentication - performs login request, extracts JWT from response, and injects as Bearer token.
+
+| Field             | Type                            | Required | Description                                  |
+| ----------------- | ------------------------------- | -------- | -------------------------------------------- |
+| `loginRequest`    | [RequestConfig](#requeststruct) | Yes      | Login request configuration                  |
+| `extractFrom`     | string                          | Optional | `header` or `body` (default: `body`)         |
+| `extractSelector` | string                          | Yes      | Header name or jq expression for token       |
+| `maxAgeSeconds`   | int                             | Optional | Token refresh interval (0 = no refresh)     |
+| `onePerRun`       | bool                            | Optional | If true, authenticate once per crawler run   |
+
+**Example (Extract from Body):**
+```yaml
+auth:
+  type: jwt
+  loginRequest:
+    url: https://api.example.com/auth/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      email: user@example.com
+      password: mypass
+  extractFrom: body
+  extractSelector: .token
+  maxAgeSeconds: 3600
+```
+
+**Example (Extract from Header):**
+```yaml
+auth:
+  type: jwt
+  loginRequest:
+    url: https://api.example.com/auth/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      username: myuser
+      password: mypass
+  extractFrom: header
+  extractSelector: X-Auth-Token
+  onePerRun: true
+```
+
+#### Type: `custom`
+
+Fully customizable authentication - specify where to extract credentials and where to inject them.
+
+| Field             | Type                            | Required | Description                                       |
+| ----------------- | ------------------------------- | -------- | ------------------------------------------------- |
+| `loginRequest`    | [RequestConfig](#requeststruct) | Yes      | Login request configuration                       |
+| `extractFrom`     | string                          | Yes      | `cookie`, `header`, or `body`                     |
+| `extractSelector` | string                          | Yes      | Cookie/header name or jq expression               |
+| `injectInto`      | string                          | Yes      | `cookie`, `header`, `bearer`, `query`, or `body`  |
+| `injectKey`       | string                          | If not bearer | Cookie/header/query/body field name          |
+| `maxAgeSeconds`   | int                             | Optional | Token refresh interval (0 = no refresh)          |
+| `onePerRun`       | bool                            | Optional | If true, authenticate once per crawler run        |
+
+**Example (Cookie to Custom Header):**
+```yaml
+auth:
+  type: custom
+  loginRequest:
+    url: https://api.example.com/login
+    method: POST
+    headers:
+      Content-Type: application/json
+    body:
+      username: myuser
+      password: mypass
+  extractFrom: cookie
+  extractSelector: auth_cookie
+  injectInto: header
+  injectKey: X-Custom-Auth
+  onePerRun: true
+```
+
+**Example (Body JSON to Query Parameter):**
+```yaml
+auth:
+  type: custom
+  loginRequest:
+    url: https://api.example.com/auth
+    method: POST
+    headers:
+      Content-Type: application/json
+  extractFrom: body
+  extractSelector: .access_token
+  injectInto: query
+  injectKey: api_key
+  maxAgeSeconds: 3600
+```
 
 ---
 
 ### ForeachStep
+
+Iterates over an array or list of values, creating a new child context for each item.
 
 | Field               | Type                 | Description                                          |
 | ------------------- | -------------------- | ---------------------------------------------------- |
@@ -169,24 +396,58 @@ rootContext: []
 | `name`              | string               | Optional name for the step                           |
 | `path`              | jq expression        | **Required.** Path to the array to iterate over      |
 | `as`                | string               | **Required.** Variable name for each item in context |
-| `values`            | array<any>           | Optional. Static values to iterate over, when using values in the url you need to access the current iteration value using `.[ctx-name].value` (example)[./examples/foreach-iteration.yaml]             |
-| `steps`             | [ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
+| `values`            | array<any>           | Optional. Static values to iterate over. When using values, access current value via `.[ctx-name].value` (see [example](./examples/foreach-iteration.yaml)) |
+| `parallel`          | bool                 | Optional. Enable parallel execution of iterations (default: false) |
+| `maxConcurrency`    | int                  | Optional. Max concurrent workers for parallel execution (default: 10) |
+| `rateLimit`         | [RateLimitConfig](#ratelimitconfig) | Optional. Rate limiting for API calls |
+| `steps`             | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
 | `mergeWithParentOn` | jq expression        | Optional. Rule for merging with parent context       |
-| `mergeOn`           | jq expression        | Optional. Rule for merging with ancestor context     |
-| `mergeWithContext`  | [MergeWithContextRule](#mergewithcontextrule) | Optional. Advanced merging rule                      |
+| `mergeOn`           | jq expression        | Optional. Rule for merging with current context      |
+| `mergeWithContext`  | [MergeWithContextRule](#mergewithcontextrule) | Optional. Advanced merging rule |
+| `noopMerge`         | bool                 | Optional. Skip merging (nested steps handle merging) |
+
+**Note:** Only one of `mergeWithParentOn`, `mergeOn`, `mergeWithContext`, or `noopMerge` can be specified.
+
+**Example with Parallel Execution:**
+```yaml
+- type: forEach
+  path: .users
+  as: user
+  parallel: true
+  maxConcurrency: 5
+  rateLimit:
+    requestsPerSecond: 10
+    burst: 2
+  steps:
+    - type: request
+      # ... fetch user details
+```
+
+---
+
+### RateLimitConfig
+
+Controls the rate of API requests to prevent overwhelming target servers.
+
+| Field               | Type    | Description                                          |
+| ------------------- | ------- | ---------------------------------------------------- |
+| `requestsPerSecond` | float64 | **Required.** Maximum requests per second            |
+| `burst`             | int     | Optional. Burst size for temporary rate exceeding (default: 1) |
 
 ---
 
 ### MergeWithContextRule
 
-| Field  | Type   | Description                |
-| ------ | ------ | -------------------------- |
-| `name` | string | **Required.** Name of rule |
-| `rule` | string | **Required.** Merge logic  |
+| Field  | Type   | Description                                  |
+| ------ | ------ | -------------------------------------------- |
+| `name` | string | **Required.** Name of ancestor context       |
+| `rule` | string | **Required.** jq expression for merge logic  |
 
 ---
 
 ### RequestStep
+
+Performs an HTTP request and optionally transforms the response.
 
 | Field               | Type          | Description                           |
 | ------------------- | ------------- | ------------------------------------- |
@@ -194,29 +455,58 @@ rootContext: []
 | `name`              | string        | Optional step name                    |
 | `request`           | [RequestStruct](#requeststruct) | **Required.** Request configuration   |
 | `resultTransformer` | jq expression | Optional transformation of the result |
+| `as`                | string        | Optional. Name for the result context (used with nested steps) |
+| `steps`             | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
+| `mergeWithParentOn` | jq expression | Optional. Rule for merging with parent context |
+| `mergeOn`           | jq expression | Optional. Rule for merging with current context |
+| `mergeWithContext`  | [MergeWithContextRule](#mergewithcontextrule) | Optional. Advanced merging rule |
+
+**Note:** Only one of `mergeWithParentOn`, `mergeOn`, or `mergeWithContext` can be specified.
 
 ---
 
 ### RequestStruct
 
-| Field        | Type                 | Description                      |                           |
-| ------------ | -------------------- | -------------------------------- | ------------------------- |
-| `url`        | go-template string   | **Required.** Request URL        |                           |
-| `method`     | string (`GET`        \| `POST`)                          | **Required.** HTTP method |
-| `headers`    | map\<string, string> | Optional headers                 |                           |
-| `body`       | yaml struct          | Optional request body            |                           |
-| `pagination` | PaginationStruct     | Optional pagination config       |                           |
-| `auth`       | AuthenticationStruct | Optional override authentication |                           |
+Defines an HTTP request configuration.
+
+| Field        | Type                 | Description                      |
+| ------------ | -------------------- | -------------------------------- |
+| `url`        | go-template string   | **Required.** Request URL with template support |
+| `method`     | string (`GET` \| `POST`) | **Required.** HTTP method |
+| `headers`    | map<string, string>  | Optional headers (use `Content-Type` here for POST body type) |
+| `body`       | map<string, any>     | Optional request body            |
+| `pagination` | [PaginationStruct](#paginationstruct) | Optional pagination config |
+| `auth`       | [AuthenticationStruct](#authenticationstruct) | Optional override authentication |
+
+**Important:** For POST requests with a body, specify `Content-Type` in the `headers` map:
+
+```yaml
+request:
+  url: https://api.example.com/data
+  method: POST
+  headers:
+    Content-Type: application/json
+  body:
+    key: value
+```
+
+Supported Content-Types:
+- `application/json` - Body will be JSON-encoded
+- `application/x-www-form-urlencoded` - Body will be form-encoded
 
 ---
 
 ### PaginationStruct
 
+Defines pagination behavior for requests.
+
 | Field    | Type                          | Description                         |
 | -------- | ----------------------------- | ----------------------------------- |
-| `nextPageUrlSelector` | string | **Optional (either nextPageUrlSelector or params).** selector for next page url e.g., `body:<jq-selector>`,  `header:<header-name>` |
-| `params` | array<PaginationParamsStruct> | **Optional (either nextPageUrlSelector or params).** Pagination parameters |
-| `stopOn` | array<PaginationStopsStruct>  | **Required.** Stop conditions       |
+| `nextPageUrlSelector` | string | **Optional (either this or params).** Selector for next page URL: `body:<jq-expression>` or `header:<header-name>` |
+| `params` | array<[PaginationParamsStruct](#paginationparamsstruct)> | **Optional (either this or nextPageUrlSelector).** Pagination parameters |
+| `stopOn` | array<[PaginationStopsStruct](#paginationstopsstruct)>  | **Required.** Stop conditions |
+
+**Note:** Use either `nextPageUrlSelector` for next-URL-based pagination OR `params` for offset/cursor-based pagination.
 
 ---
 
@@ -227,10 +517,40 @@ rootContext: []
 | `name`      | string | **Required.** Parameter name                                |
 | `location`  | string | **Required.** One of: `query`, `body`, `header`             |
 | `type`      | string | **Required.** One of: `int`, `float`, `datetime`, `dynamic` |
-| `format`    | string | Optional. Required if `type == datetime` (Go time format)   |
-| `default`   | any    | Optional. Must match the `type`                             |
-| `increment` | string | Optional. Increment step                                    |
-| `source`    | string | Required if `type == dynamic`. e.g., `body:<jq-selector>`,  `header:<header-name>`  |
+| `format`    | string | Required if `type == datetime` (Go time format)             |
+| `default`   | string | **Required.** Initial value (must match the `type`)         |
+| `increment` | string | Optional. Increment expression (e.g., `+ 10`, `+1d`)        |
+| `source`    | string | Required if `type == dynamic`. Format: `body:<jq-expr>` or `header:<name>` |
+
+**Examples:**
+
+Integer offset pagination:
+```yaml
+pagination:
+  params:
+    - name: offset
+      location: query
+      type: int
+      default: "0"
+      increment: "+ 50"
+  stopOn:
+    - type: pageNum
+      value: 10
+```
+
+Dynamic token pagination:
+```yaml
+pagination:
+  params:
+    - name: cursor
+      location: query
+      type: dynamic
+      source: "body:.pagination.next_cursor"
+      default: ""
+  stopOn:
+    - type: responseBody
+      expression: ".pagination.next_cursor == null"
+```
 
 ---
 
@@ -238,11 +558,74 @@ rootContext: []
 
 | Field        | Type          | Description                                                         |
 | ------------ | ------------- | ------------------------------------------------------------------- |
-| `type`       | string        | **Required.** One of: `responseBody`, `requestParam`, `pageNum`                |
-| `expression` | jq expression | Required if `type == responseBody`                                  |
-| `param`      | string        | Required if `type == requestParam`                                  |
-| `compare`    | string        | Required if `type == requestParam`. One of: `lt`, `lte`, `eq`, etc. |
-| `value`      | any           | Required if `type == requestParam or type == pageNum`                                  |
+| `type`       | string        | **Required.** One of: `responseBody`, `requestParam`, `pageNum`     |
+| `expression` | jq expression | Required if `type == responseBody`. Boolean jq expression           |
+| `param`      | string        | Required if `type == requestParam`. Format: `.<location>.<name>`    |
+| `compare`    | string        | Required if `type == requestParam`. One of: `lt`, `lte`, `eq`, `gt`, `gte` |
+| `value`      | any           | Required if `type == requestParam` or `type == pageNum`             |
+
+**Examples:**
+
+Stop when response indicates no more pages:
+```yaml
+stopOn:
+  - type: responseBody
+    expression: ".data | length == 0"
+```
+
+Stop when offset reaches limit:
+```yaml
+stopOn:
+  - type: requestParam
+    param: .query.offset
+    compare: gte
+    value: 1000
+```
+
+Stop after 5 pages:
+```yaml
+stopOn:
+  - type: pageNum
+    value: 5
+```
+
+---
+
+## Parallel Execution
+
+ApiGorowler supports parallel execution of `forEach` iterations, significantly improving performance for I/O-bound operations.
+
+### Configuration
+
+```yaml
+- type: forEach
+  path: .items
+  as: item
+  parallel: true           # Enable parallel execution
+  maxConcurrency: 10       # Optional: max concurrent workers (default: 10)
+  rateLimit:               # Optional: rate limiting
+    requestsPerSecond: 5.0
+    burst: 2
+  steps:
+    - type: request
+      # ... nested requests execute in parallel
+```
+
+### Features
+
+- **Thread-safe merging**: All merge operations use mutexes for safe concurrent access
+- **Worker pool**: Limits concurrent operations to prevent overwhelming APIs
+- **Rate limiting**: Controls request rate across all workers
+- **Deterministic results**: Results maintain iteration order even with parallel execution
+- **Nested parallelism**: Each forEach level can have its own parallelism settings
+
+### Best Practices
+
+1. Use parallelism for I/O-bound operations (API calls, database queries)
+2. Set appropriate `maxConcurrency` based on target API limits
+3. Always configure `rateLimit` to respect API rate limits
+4. Monitor for race conditions when merging to shared contexts
+5. Use `noopMerge` with nested step merges for predictable ordering
 
 ---
 
@@ -251,7 +634,22 @@ rootContext: []
 When `stream: true` is enabled at the top-level, the crawler emits entities incrementally as it processes them. In this mode:
 
 * `rootContext` must be an empty array (`[]`)
-* Each `forEach` or `request` result is pushed to the output stream
+* Each result from `forEach` or `request` is pushed to the output stream
+* Streaming happens at depth 0 or 1 in the context hierarchy
+* The final result will be an empty array (data is streamed, not accumulated)
+
+**Example:**
+```yaml
+rootContext: []
+stream: true
+
+steps:
+  - type: request
+    # ... fetches list
+    steps:
+      - type: forEach
+        # Each item is streamed as it's processed
+```
 
 ---
 
@@ -262,16 +660,16 @@ The CLI utility enables real-time execution of your manifest with step-by-step i
 * Validate configuration
 * Execute each step and inspect intermediate results
 * Debug jq and template expressions interactively
+* Visualize context hierarchy and data flow
+* Profile execution performance
 
 ---
-
-Of course! Here's the completed section.
 
 ## Examples
 
 The package includes several tests and examples to better understand its usage. The configuration files listed below demonstrate various features.
 
-Feel free to contribute by adding more examples or tests\! 🚀
+Feel free to contribute by adding more examples or tests! 🚀
 
 -----
 
@@ -294,12 +692,15 @@ These files are used for automated testing of the **paginator** and **crawler** 
 | [`example2.yaml`](testdata/crawler/example2.yaml)                                        | A more complex crawler example with nested requests.                     |
 | [`example_single.yaml`](testdata/crawler/example_single.yaml)                            | Defines a single, non-paginated API request.                             |
 | [`example_foreach_value.yaml`](testdata/crawler/example_foreach_value.yaml)              | Demonstrates `foreach` iteration over response values.                   |
-| [`example_foreach_value_transform_ctx.yaml`](testdata/crawler/example_foreach_value_transform_ctx.yaml)              | Demonstrates `foreach` iteration over response values using the value itself in transformation                   |
+| [`example_foreach_value_transform_ctx.yaml`](testdata/crawler/example_foreach_value_transform_ctx.yaml) | Demonstrates `foreach` iteration using value in transformation |
 | [`example_foreach_value_stream.yaml`](testdata/crawler/example_foreach_value_stream.yaml)| Demonstrates `foreach` iteration with streaming enabled.                 |
 | [`example_pagination_next.yaml`](testdata/crawler/example_pagination_next.yaml)          | Tests pagination using a `next_url` path from the response.              |
 | [`example_pagination_increment.yaml`](testdata/crawler/example_pagination_increment.yaml)| Tests simple pagination based on an incrementing number.                 |
 | [`example_pagination_increment_stream.yaml`](testdata/crawler/example_pagination_increment_stream.yaml)| Tests simple pagination with streaming enabled.                          |
 | [`example_pagination_increment_nested.yaml`](testdata/crawler/example_pagination_increment_nested.yaml)| Tests pagination on a nested API request.                                |
+| [`post_json_body.yaml`](testdata/crawler/post_json_body.yaml)                            | Tests POST request with JSON body.                                       |
+| [`post_form_urlencoded.yaml`](testdata/crawler/post_form_urlencoded.yaml)                | Tests POST request with form-encoded body.                               |
+| [`post_body_merge_pagination.yaml`](testdata/crawler/post_body_merge_pagination.yaml)    | Tests POST with body, pagination, and custom merging.                    |
 
 -----
 
@@ -316,4 +717,6 @@ These files provide practical, ready-to-use examples for common crawling pattern
 -----
 
 ## Debug & development
-(cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2)
+```bash
+cd cmd/ide && dlv debug gui.go --headless=true --listen=:2345 --api-version=2
+```
