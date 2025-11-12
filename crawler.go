@@ -132,6 +132,7 @@ func newProfilerEventWithWorker(eventType ProfileEventType, name string, parentI
 }
 
 // serializeContextMap converts a context map to a safe serializable format
+// NOTE: Caller must hold c.mergeMutex if accessing shared context maps
 func serializeContextMap(contextMap map[string]*Context) map[string]any {
 	result := make(map[string]any)
 	for key, ctx := range contextMap {
@@ -143,6 +144,13 @@ func serializeContextMap(contextMap map[string]*Context) map[string]any {
 		}
 	}
 	return result
+}
+
+// serializeContextMapSafe serializes context map with proper locking for concurrent access
+func (c *ApiCrawler) serializeContextMapSafe(contextMap map[string]*Context) map[string]any {
+	c.mergeMutex.Lock()
+	defer c.mergeMutex.Unlock()
+	return serializeContextMap(contextMap)
 }
 
 // buildContextPath builds the hierarchical path from root to current context
@@ -238,8 +246,9 @@ func (l *stdLogger) Error(msg string, args ...any) {
 
 const RES_KEY = "$res"
 
-type RateLimitConfig struct {
-	RequestsPerSecond float64 `yaml:"requestsPerSecond" json:"requestsPerSecond"`
+type ParallelismConfig struct {
+	MaxConcurrency    int     `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
+	RequestsPerSecond float64 `yaml:"requestsPerSecond,omitempty" json:"requestsPerSecond,omitempty"`
 	Burst             int     `yaml:"burst,omitempty" json:"burst,omitempty"`
 }
 
@@ -264,9 +273,7 @@ type Step struct {
 	MergeOn           string                `yaml:"mergeOn,omitempty" json:"mergeOn,omitempty"`
 	MergeWithContext  *MergeWithContextRule `yaml:"mergeWithContext,omitempty" json:"mergeWithContext,omitempty"`
 	NoopMerge         bool                  `yaml:"noopMerge,omitempty" json:"noopMerge,omitempty"`
-	Parallel          bool                  `yaml:"parallel,omitempty" json:"parallel,omitempty"`
-	MaxConcurrency    int                   `yaml:"maxConcurrency,omitempty" json:"maxConcurrency,omitempty"`
-	RateLimit         *RateLimitConfig      `yaml:"rateLimit,omitempty" json:"rateLimit,omitempty"`
+	Parallelism       *ParallelismConfig    `yaml:"parallelism,omitempty" json:"parallelism,omitempty"`
 }
 
 type RequestConfig struct {
@@ -342,11 +349,6 @@ type ApiCrawler struct {
 	templateCache       map[string]*template.Template
 	jqCache             map[string]*gojq.Code
 	mergeMutex          sync.Mutex // Protects concurrent merge operations
-
-	// Phase 2: Snapshot system
-	snapshotStore   map[string]ContextMapSnapshot
-	snapshotMutex   sync.Mutex // Protects snapshot store
-	snapshotCounter int
 }
 
 func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
@@ -367,15 +369,13 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 	}
 
 	c := &ApiCrawler{
-		httpClient:      http.DefaultClient,
-		Config:          cfg,
-		ContextMap:      map[string]*Context{},
-		logger:          NewDefaultLogger(),
-		profiler:        nil,
-		templateCache:   make(map[string]*template.Template),
-		jqCache:         make(map[string]*gojq.Code),
-		snapshotStore:   make(map[string]ContextMapSnapshot),
-		snapshotCounter: 0,
+		httpClient:    http.DefaultClient,
+		Config:        cfg,
+		ContextMap:    map[string]*Context{},
+		logger:        NewDefaultLogger(),
+		profiler:      nil,
+		templateCache: make(map[string]*template.Template),
+		jqCache:       make(map[string]*gojq.Code),
 	}
 
 	// handle stream channel
@@ -452,84 +452,6 @@ func (a *ApiCrawler) getOrCompileJQRule(ruleString string, variables ...string) 
 	return code, nil
 }
 
-func deepCopy[T any](src T) (T, error) {
-	// Use JSON marshaling for deep copy - more reliable for JSON data than gob
-	var dst T
-
-	jsonBytes, err := json.Marshal(src)
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-
-	if err := json.Unmarshal(jsonBytes, &dst); err != nil {
-		var zero T
-		return zero, err
-	}
-
-	return dst, nil
-}
-
-// captureSnapshot creates a snapshot of the current context map state
-func (a *ApiCrawler) captureSnapshot(eventID string) string {
-	if a.profiler == nil {
-		return "" // No profiling enabled
-	}
-
-	a.snapshotMutex.Lock()
-	defer a.snapshotMutex.Unlock()
-
-	// Generate unique snapshot ID
-	a.snapshotCounter++
-	snapshotID := fmt.Sprintf("snapshot_%d", a.snapshotCounter)
-
-	// Create context data map
-	contexts := make(map[string]ContextData)
-	for key, ctx := range a.ContextMap {
-		// Deep copy the data to avoid race conditions
-		dataCopy, _ := deepCopy(ctx.Data)
-		contexts[key] = ContextData{
-			Data:          dataCopy,
-			ParentContext: ctx.ParentContext,
-			Depth:         ctx.depth,
-			Key:           ctx.key,
-		}
-	}
-
-	// Store snapshot
-	snapshot := ContextMapSnapshot{
-		ID:        snapshotID,
-		Timestamp: fmt.Sprintf("%d", a.snapshotCounter), // Simple incrementing timestamp
-		EventID:   eventID,
-		Contexts:  contexts,
-	}
-
-	a.snapshotStore[snapshotID] = snapshot
-	return snapshotID
-}
-
-// getSnapshot retrieves a snapshot by ID
-func (a *ApiCrawler) getSnapshot(snapshotID string) (ContextMapSnapshot, bool) {
-	a.snapshotMutex.Lock()
-	defer a.snapshotMutex.Unlock()
-
-	snapshot, ok := a.snapshotStore[snapshotID]
-	return snapshot, ok
-}
-
-// GetAllSnapshots returns all snapshots (for CLI to output)
-func (a *ApiCrawler) GetAllSnapshots() map[string]ContextMapSnapshot {
-	a.snapshotMutex.Lock()
-	defer a.snapshotMutex.Unlock()
-
-	// Return copy to avoid concurrent access
-	snapshots := make(map[string]ContextMapSnapshot)
-	for k, v := range a.snapshotStore {
-		snapshots[k] = v
-	}
-	return snapshots
-}
-
 func newStepExecution(step Step, currentContextKey string, contextMap map[string]*Context, parentID string) *stepExecution {
 	return &stepExecution{
 		step:              step,
@@ -567,7 +489,7 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 	if c.profiler != nil {
 		event := newProfilerEvent(EVENT_ROOT_START, "Root Start", "", Step{})
 		event.Data = map[string]any{
-			"contextMap": serializeContextMap(c.ContextMap),
+			"contextMap": c.serializeContextMapSafe(c.ContextMap),
 			"config": map[string]any{
 				"rootContext": c.Config.RootContext,
 				"stream":      c.Config.Stream,
@@ -587,8 +509,11 @@ func (c *ApiCrawler) Run(ctx context.Context) error {
 	// Emit final result if not streaming
 	if c.profiler != nil && !c.Config.Stream {
 		resultEvent := newProfilerEvent(EVENT_RESULT, "Final Result", rootID, Step{})
+		c.mergeMutex.Lock()
+		finalResult := copyDataSafe(rootCtx.Data)
+		c.mergeMutex.Unlock()
 		resultEvent.Data = map[string]any{
-			"result": copyDataSafe(rootCtx.Data),
+			"result": finalResult,
 		}
 		c.profiler <- resultEvent
 	}
@@ -898,7 +823,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				"contextPath":        contextPath,
 				"currentContextKey":  thisContextKey,
 				"currentContextData": copyDataSafe(childContextMap[thisContextKey].Data),
-				"fullContextMap":     serializeContextMap(childContextMap),
+				"fullContextMap":     c.serializeContextMapSafe(childContextMap),
 			}
 			c.profiler <- event
 		}
@@ -922,7 +847,13 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 			templateContext: templateCtx,
 		}
 
-		dataBefore := exec.currentContext.Data
+		var dataBefore any = nil
+		if c.profiler != nil {
+			// Capture data before merge with mutex protection
+			c.mergeMutex.Lock()
+			dataBefore = copyDataSafe(exec.currentContext.Data)
+			c.mergeMutex.Unlock()
+		}
 
 		mergeStepName, err := c.performMerge(mergeOp)
 		if err != nil {
@@ -949,20 +880,18 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 				targetContextKey = exec.step.MergeWithContext.Name
 			}
 
-			// Get target context data
-			targetContext := exec.contextMap[targetContextKey]
-			var targetContextBefore interface{}
-			if targetContext != nil {
-				targetContextBefore = dataBefore
-			}
+			// Capture data after merge with mutex protection
+			c.mergeMutex.Lock()
+			dataAfter := copyDataSafe(exec.currentContext.Data)
+			c.mergeMutex.Unlock()
 
 			event.Data = map[string]any{
 				"currentContextKey":   currentContextKey,
 				"targetContextKey":    targetContextKey,
 				"mergeRule":           mergeRule,
-				"targetContextBefore": copyDataSafe(targetContextBefore),
-				"targetContextAfter":  copyDataSafe(exec.currentContext.Data),
-				"fullContextMap":      serializeContextMap(exec.contextMap),
+				"targetContextBefore": dataBefore,
+				"targetContextAfter":  dataAfter,
+				"fullContextMap":      c.serializeContextMapSafe(exec.contextMap),
 				// TODO: Add diff computation
 			}
 			c.profiler <- event
@@ -1021,27 +950,6 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	return nil
 }
 
-// createRateLimiter creates a rate limiter from config, returns nil if no rate limiting
-func createRateLimiter(stepLimit *RateLimitConfig) *rate.Limiter {
-	var limitConfig *RateLimitConfig
-
-	// Step-level rate limit takes precedence
-	if stepLimit != nil {
-		limitConfig = stepLimit
-	}
-
-	if limitConfig == nil || limitConfig.RequestsPerSecond <= 0 {
-		return nil
-	}
-
-	burst := limitConfig.Burst
-	if burst <= 0 {
-		burst = 1 // Default burst size
-	}
-
-	return rate.NewLimiter(rate.Limit(limitConfig.RequestsPerSecond), burst)
-}
-
 // executeForEachIteration executes a single forEach iteration
 func (c *ApiCrawler) executeForEachIteration(
 	ctx context.Context,
@@ -1070,7 +978,7 @@ func (c *ApiCrawler) executeForEachIteration(
 			"contextPath":        contextPath,
 			"currentContextKey":  exec.step.As,
 			"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
-			"fullContextMap":     serializeContextMap(childContextMap),
+			"fullContextMap":     c.serializeContextMapSafe(childContextMap),
 		}
 		c.profiler <- event
 	}
@@ -1250,15 +1158,22 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 	var executionResults []interface{}
 	var err error
 
-	if exec.step.Parallel {
-		// Determine max concurrency (step > global > default)
-		maxConcurrency := exec.step.MaxConcurrency
+	if exec.step.Parallelism != nil {
+		// Determine max concurrency (step setting or default)
+		maxConcurrency := exec.step.Parallelism.MaxConcurrency
 		if maxConcurrency == 0 {
 			maxConcurrency = 10 // Default concurrency
 		}
 
 		// Create rate limiter if configured
-		rateLimiter := createRateLimiter(exec.step.RateLimit)
+		var rateLimiter *rate.Limiter
+		if exec.step.Parallelism.RequestsPerSecond > 0 {
+			burst := exec.step.Parallelism.Burst
+			if burst == 0 {
+				burst = 1 // Default burst
+			}
+			rateLimiter = rate.NewLimiter(rate.Limit(exec.step.Parallelism.RequestsPerSecond), burst)
+		}
 
 		// Emit PARALLELISM_SETUP event
 		if c.profiler != nil {
@@ -1275,10 +1190,8 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 				"workerIds":      workerIDs,
 			}
 			if rateLimiter != nil {
-				if exec.step.RateLimit != nil {
-					event.Data["rateLimit"] = exec.step.RateLimit.RequestsPerSecond
-					event.Data["burst"] = exec.step.RateLimit.Burst
-				}
+				event.Data["rateLimit"] = exec.step.Parallelism.RequestsPerSecond
+				event.Data["burst"] = exec.step.Parallelism.Burst
 			}
 			c.profiler <- event
 		}
@@ -1313,7 +1226,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 					"contextPath":        contextPath,
 					"currentContextKey":  exec.step.As,
 					"currentContextData": copyDataSafe(childContextMap[exec.step.As].Data),
-					"fullContextMap":     serializeContextMap(childContextMap),
+					"fullContextMap":     c.serializeContextMapSafe(childContextMap),
 				}
 				c.profiler <- event
 			}
@@ -1689,28 +1602,6 @@ func contextMapToTemplate(base map[string]*Context) map[string]interface{} {
 	return result
 }
 
-// getTypeDescription returns a human-readable type description for profiler events
-func getTypeDescription(v interface{}) string {
-	if v == nil {
-		return "null"
-	}
-
-	switch val := v.(type) {
-	case []interface{}:
-		return fmt.Sprintf("array[%d]", len(val))
-	case map[string]interface{}:
-		return fmt.Sprintf("object{%d}", len(val))
-	case string:
-		return "string"
-	case float64, int, int64:
-		return "number"
-	case bool:
-		return "boolean"
-	default:
-		return fmt.Sprintf("%T", v)
-	}
-}
-
 // copyDataSafe creates a safe copy of data for profiler events (non-JSON approach)
 func copyDataSafe(v interface{}) interface{} {
 	if v == nil {
@@ -1733,15 +1624,5 @@ func copyDataSafe(v interface{}) interface{} {
 	default:
 		// Primitives and other types are safe to share
 		return v
-	}
-}
-
-// copyContextSafe creates a safe copy of Context for profiler events
-func copyContextSafe(ctx Context) Context {
-	return Context{
-		Data:          copyDataSafe(ctx.Data),
-		ParentContext: ctx.ParentContext,
-		key:           ctx.key,
-		depth:         ctx.depth,
 	}
 }
