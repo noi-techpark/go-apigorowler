@@ -98,9 +98,6 @@ func main() {
 	// Run crawler
 	ctx := context.Background()
 	err = crawler.Run(ctx)
-	if err != nil {
-		log.Fatalf("Crawl failed: %v", err)
-	}
 
 	// Wait for stream to finish if in stream mode
 	if crawler.Config.Stream {
@@ -112,6 +109,10 @@ func main() {
 	if *profilerFlag {
 		close(profilerChan)
 		wg.Wait() // ✅ Wait until all profiler data is consumed
+	}
+
+	if err != nil {
+		log.Fatalf("Crawl failed: %v", err)
 	}
 
 	// Get result from crawler context

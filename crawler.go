@@ -103,6 +103,24 @@ func newProfilerEvent(eventType ProfileEventType, name string, parentID string, 
 	}
 }
 
+// Helper to create profiler events with UUID4
+func emitProfilerError(profiler chan StepProfilerData, name string, parentID string, err string) {
+	if nil == profiler {
+		return
+	}
+	profiler <- StepProfilerData{
+		ID:        uuid.New().String(),
+		ParentID:  parentID,
+		Type:      EVENT_ERROR,
+		Name:      name,
+		Step:      Step{},
+		Timestamp: time.Now(),
+		Data: map[string]any{
+			"error": err,
+		},
+	}
+}
+
 // Helper to create profiler events with worker tracking
 func newProfilerEventWithWorker(eventType ProfileEventType, name string, parentID string, step Step, workerID int, workerPool string) StepProfilerData {
 	event := newProfilerEvent(eventType, name, parentID, step)
@@ -620,6 +638,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 	// Initialize paginator
 	paginator, err := NewPaginator(ConfigP{exec.step.Request.Pagination})
 	if err != nil {
+		emitProfilerError(c.profiler, "Paginator Error", stepID, err.Error())
 		return fmt.Errorf("error creating request paginator: %w", err)
 	}
 
@@ -669,6 +688,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		req, urlObj, err := c.prepareHTTPRequest(reqCtx, templateCtx, c.Config.Headers)
 		if err != nil {
+			emitProfilerError(c.profiler, "Prepare Request Error", pageID, err.Error())
 			return err
 		}
 
@@ -748,6 +768,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		requestStartTime := time.Now()
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			emitProfilerError(c.profiler, "Request Error", pageID, err.Error())
 			return fmt.Errorf("error performing HTTP request: %w", err)
 		}
 		defer resp.Body.Close()
@@ -772,12 +793,14 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		// Update pagination state (reads and restores response body)
 		next, stop, err = paginator.Next(resp)
 		if err != nil {
+			emitProfilerError(c.profiler, "Paginator Error", pageID, err.Error())
 			return fmt.Errorf("paginator update error: %w", err)
 		}
 
 		// Decode JSON response
 		var raw interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+			emitProfilerError(c.profiler, "Response Decode Error", pageID, err.Error())
 			return fmt.Errorf("error decoding response JSON: %w", err)
 		}
 
@@ -841,6 +864,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		// Transform response
 		transformed, err := c.transformResult(raw, exec.step.ResultTransformer, templateCtx)
 		if err != nil {
+			emitProfilerError(c.profiler, "Response Transform Error", pageID, err.Error())
 			return err
 		}
 
@@ -901,6 +925,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		mergeStepName, err := c.performMerge(mergeOp)
 		if err != nil {
+			emitProfilerError(c.profiler, "Merge Error", pageID, err.Error())
 			return err
 		}
 
@@ -1190,6 +1215,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 		code, err := c.getOrCompileJQRule(exec.step.Path)
 		if err != nil {
+			emitProfilerError(c.profiler, "Path Extraction Error", stepID, err.Error())
 			return fmt.Errorf("failed to get/compile jq path: %w", err)
 		}
 
@@ -1334,6 +1360,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 
 		_, err := c.performMerge(mergeOp)
 		if err != nil {
+			emitProfilerError(c.profiler, "Merge Error", stepID, err.Error())
 			return err
 		}
 
@@ -1341,6 +1368,7 @@ func (c *ApiCrawler) handleForEach(ctx context.Context, exec *stepExecution) err
 		// Default: patch the array at exec.step.Path with new results
 		code, err := c.getOrCompileJQRule(exec.step.Path+" = $new", "$new")
 		if err != nil {
+			emitProfilerError(c.profiler, "Merge Error", stepID, err.Error())
 			return fmt.Errorf("failed to get/compile merge rule: %w", err)
 		}
 

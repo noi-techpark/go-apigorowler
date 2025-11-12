@@ -37,24 +37,32 @@ func escapeBrackets(input string) string {
 
 func getEventTypeName(t apigorowler.ProfileEventType) string {
 	names := map[apigorowler.ProfileEventType]string{
-		apigorowler.EVENT_ROOT_START:          "Root Start",
-		apigorowler.EVENT_REQUEST_STEP_START:  "Request Step Start",
-		apigorowler.EVENT_REQUEST_STEP_END:    "Request Step End",
-		apigorowler.EVENT_CONTEXT_SELECTION:   "Context Selection",
-		apigorowler.EVENT_REQUEST_PAGE_START:  "Request Page Start",
-		apigorowler.EVENT_REQUEST_PAGE_END:    "Request Page End",
-		apigorowler.EVENT_PAGINATION_EVAL:     "Pagination Evaluation",
-		apigorowler.EVENT_URL_COMPOSITION:     "URL Composition",
-		apigorowler.EVENT_REQUEST_DETAILS:     "Request Details",
-		apigorowler.EVENT_REQUEST_RESPONSE:    "Request Response",
-		apigorowler.EVENT_RESPONSE_TRANSFORM:  "Response Transform",
-		apigorowler.EVENT_CONTEXT_MERGE:       "Context Merge",
-		apigorowler.EVENT_FOREACH_STEP_START:  "ForEach Step Start",
-		apigorowler.EVENT_FOREACH_STEP_END:    "ForEach Step End",
-		apigorowler.EVENT_PARALLELISM_SETUP:   "Parallelism Setup",
-		apigorowler.EVENT_ITEM_SELECTION:      "Item Selection",
-		apigorowler.EVENT_RESULT:              "Result",
-		apigorowler.EVENT_STREAM_RESULT:       "Stream Result",
+		apigorowler.EVENT_ROOT_START:           "Root Start",
+		apigorowler.EVENT_REQUEST_STEP_START:   "Request Step Start",
+		apigorowler.EVENT_REQUEST_STEP_END:     "Request Step End",
+		apigorowler.EVENT_CONTEXT_SELECTION:    "Context Selection",
+		apigorowler.EVENT_REQUEST_PAGE_START:   "Request Page Start",
+		apigorowler.EVENT_REQUEST_PAGE_END:     "Request Page End",
+		apigorowler.EVENT_PAGINATION_EVAL:      "Pagination Evaluation",
+		apigorowler.EVENT_URL_COMPOSITION:      "URL Composition",
+		apigorowler.EVENT_REQUEST_DETAILS:      "Request Details",
+		apigorowler.EVENT_REQUEST_RESPONSE:     "Request Response",
+		apigorowler.EVENT_RESPONSE_TRANSFORM:   "Response Transform",
+		apigorowler.EVENT_CONTEXT_MERGE:        "Context Merge",
+		apigorowler.EVENT_FOREACH_STEP_START:   "ForEach Step Start",
+		apigorowler.EVENT_FOREACH_STEP_END:     "ForEach Step End",
+		apigorowler.EVENT_PARALLELISM_SETUP:    "Parallelism Setup",
+		apigorowler.EVENT_ITEM_SELECTION:       "Item Selection",
+		apigorowler.EVENT_AUTH_START:           "Auth Start",
+		apigorowler.EVENT_AUTH_CACHED:          "Auth Cached",
+		apigorowler.EVENT_AUTH_LOGIN_START:     "Auth Login Start",
+		apigorowler.EVENT_AUTH_LOGIN_END:       "Auth Login End",
+		apigorowler.EVENT_AUTH_TOKEN_EXTRACT:   "Token Extract",
+		apigorowler.EVENT_AUTH_TOKEN_INJECT:    "Token Inject",
+		apigorowler.EVENT_AUTH_END:             "Auth End",
+		apigorowler.EVENT_RESULT:               "Result",
+		apigorowler.EVENT_STREAM_RESULT:        "Stream Result",
+		apigorowler.EVENT_ERROR:                "Error",
 	}
 	if name, ok := names[t]; ok {
 		return name
@@ -67,20 +75,26 @@ func isContainerEvent(t apigorowler.ProfileEventType) bool {
 		t == apigorowler.EVENT_REQUEST_STEP_START ||
 		t == apigorowler.EVENT_FOREACH_STEP_START ||
 		t == apigorowler.EVENT_REQUEST_PAGE_START ||
-		t == apigorowler.EVENT_ITEM_SELECTION
+		t == apigorowler.EVENT_ITEM_SELECTION ||
+		t == apigorowler.EVENT_AUTH_START ||
+		t == apigorowler.EVENT_AUTH_LOGIN_START
 }
 
 func isStartEvent(t apigorowler.ProfileEventType) bool {
 	return t == apigorowler.EVENT_ROOT_START ||
 		t == apigorowler.EVENT_REQUEST_STEP_START ||
 		t == apigorowler.EVENT_FOREACH_STEP_START ||
-		t == apigorowler.EVENT_REQUEST_PAGE_START
+		t == apigorowler.EVENT_REQUEST_PAGE_START ||
+		t == apigorowler.EVENT_AUTH_START ||
+		t == apigorowler.EVENT_AUTH_LOGIN_START
 }
 
 func isEndEvent(t apigorowler.ProfileEventType) bool {
 	return t == apigorowler.EVENT_REQUEST_STEP_END ||
 		t == apigorowler.EVENT_FOREACH_STEP_END ||
-		t == apigorowler.EVENT_REQUEST_PAGE_END
+		t == apigorowler.EVENT_REQUEST_PAGE_END ||
+		t == apigorowler.EVENT_AUTH_END ||
+		t == apigorowler.EVENT_AUTH_LOGIN_END
 }
 
 func getHelpText() string {
@@ -783,8 +797,20 @@ func (c *ConsoleApp) updateStepDetails(node *tview.TreeNode) {
 		c.formatParallelismSetup(&detailsText, data)
 	case apigorowler.EVENT_ITEM_SELECTION:
 		c.formatItemSelection(&detailsText, data)
+	case apigorowler.EVENT_AUTH_START, apigorowler.EVENT_AUTH_END:
+		c.formatAuthStartEnd(&detailsText, data)
+	case apigorowler.EVENT_AUTH_CACHED:
+		c.formatAuthCached(&detailsText, data)
+	case apigorowler.EVENT_AUTH_LOGIN_START, apigorowler.EVENT_AUTH_LOGIN_END:
+		c.formatAuthLogin(&detailsText, data)
+	case apigorowler.EVENT_AUTH_TOKEN_EXTRACT:
+		c.formatAuthTokenExtract(&detailsText, data)
+	case apigorowler.EVENT_AUTH_TOKEN_INJECT:
+		c.formatAuthTokenInject(&detailsText, data)
 	case apigorowler.EVENT_RESULT, apigorowler.EVENT_STREAM_RESULT:
 		c.formatResult(&detailsText, data)
+	case apigorowler.EVENT_ERROR:
+		c.formatError(&detailsText, data)
 	default:
 		// Generic data display
 		if len(data.Data) > 0 {
@@ -1068,6 +1094,186 @@ func (c *ConsoleApp) formatResult(sb *strings.Builder, data apigorowler.StepProf
 	if result != nil {
 		sb.WriteString("[cyan::b]Result:[-:-:-]\n")
 		jsonStr, _ := json.MarshalIndent(result, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatAuthStartEnd(sb *strings.Builder, data apigorowler.StepProfilerData) {
+	if authType, ok := data.Data["authType"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Authentication Type:[-:-:-] %s\n\n", authType))
+	}
+
+	if err, ok := data.Data["error"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[red::b]Error:[-:-:-]\n%s\n\n", escapeBrackets(err)))
+	}
+
+	if len(data.Data) > 0 {
+		sb.WriteString("[cyan::b]Auth Data:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatAuthCached(sb *strings.Builder, data apigorowler.StepProfilerData) {
+	sb.WriteString("[green::b]Using cached credentials[-:-:-]\n\n")
+
+	if age, ok := data.Data["age"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cache Age:[-:-:-] %s\n", age))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+
+	if cookieName, ok := data.Data["cookieName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Name:[-:-:-] %s\n", escapeBrackets(cookieName)))
+	}
+
+	if cookieValue, ok := data.Data["cookieValue"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Value (Masked):[-:-:-] %s\n", escapeBrackets(cookieValue)))
+	}
+}
+
+func (c *ConsoleApp) formatAuthLogin(sb *strings.Builder, data apigorowler.StepProfilerData) {
+	if url, ok := data.Data["url"].(string); ok {
+		if method, ok := data.Data["method"].(string); ok {
+			sb.WriteString(fmt.Sprintf("[cyan::b]Login URL:[-:-:-] %s %s\n\n", method, escapeBrackets(url)))
+		} else {
+			sb.WriteString(fmt.Sprintf("[cyan::b]Login URL:[-:-:-] %s\n\n", escapeBrackets(url)))
+		}
+	}
+
+	if status, ok := data.Data["statusCode"]; ok {
+		var statusCode int
+		switch v := status.(type) {
+		case int:
+			statusCode = v
+		case float64:
+			statusCode = int(v)
+		case int64:
+			statusCode = int(v)
+		default:
+			statusCode = 0
+		}
+
+		color := "green"
+		if statusCode >= 400 {
+			color = "red"
+		} else if statusCode >= 300 {
+			color = "yellow"
+		}
+		sb.WriteString(fmt.Sprintf("[%s::b]Status Code:[-:-:-] %d\n\n", color, statusCode))
+	}
+
+	if err, ok := data.Data["error"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[red::b]Error:[-:-:-]\n%s\n\n", escapeBrackets(err)))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+
+	if len(data.Data) > 0 {
+		sb.WriteString("\n[cyan::b]Full Login Data:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
+		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
+	}
+}
+
+func (c *ConsoleApp) formatAuthTokenExtract(sb *strings.Builder, data apigorowler.StepProfilerData) {
+	if extractFrom, ok := data.Data["extractFrom"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Extract From:[-:-:-] %s\n", extractFrom))
+	} else if selector, ok := data.Data["extractSelector"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Extract Selector:[-:-:-] %s\n", selector))
+	}
+
+	if cookieName, ok := data.Data["cookieName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Name:[-:-:-] %s\n", escapeBrackets(cookieName)))
+	}
+
+	if cookieValue, ok := data.Data["cookieValue"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Value (Masked):[-:-:-] %s\n", escapeBrackets(cookieValue)))
+	}
+
+	if headerName, ok := data.Data["headerName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Header Name:[-:-:-] %s\n", escapeBrackets(headerName)))
+	}
+
+	if jqSelector, ok := data.Data["jqSelector"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]JQ Selector:[-:-:-] %s\n", escapeBrackets(jqSelector)))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[green::b]Extracted Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+}
+
+func (c *ConsoleApp) formatAuthTokenInject(sb *strings.Builder, data apigorowler.StepProfilerData) {
+	if location, ok := data.Data["location"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Injection Location:[-:-:-] %s\n", location))
+	}
+
+	if format, ok := data.Data["format"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Format:[-:-:-] %s\n", format))
+	}
+
+	if token, ok := data.Data["token"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Token (Masked):[-:-:-] %s\n", escapeBrackets(token)))
+	}
+
+	if headerKey, ok := data.Data["headerKey"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Header Key:[-:-:-] %s\n", escapeBrackets(headerKey)))
+	}
+
+	if queryKey, ok := data.Data["queryKey"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Query Parameter Key:[-:-:-] %s\n", escapeBrackets(queryKey)))
+	}
+
+	if cookieName, ok := data.Data["cookieName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Name:[-:-:-] %s\n", escapeBrackets(cookieName)))
+	}
+
+	if cookieValue, ok := data.Data["cookieValue"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Cookie Value (Masked):[-:-:-] %s\n", escapeBrackets(cookieValue)))
+	}
+}
+
+func (c *ConsoleApp) formatError(sb *strings.Builder, data apigorowler.StepProfilerData) {
+	// Try multiple keys for error message
+	var errorMsg string
+	if err, ok := data.Data["error"].(string); ok {
+		errorMsg = err
+	} else if msg, ok := data.Data["message"].(string); ok {
+		errorMsg = msg
+	} else {
+		errorMsg = "Unknown error"
+	}
+
+	sb.WriteString(fmt.Sprintf("[red::b]Error Message:[-:-:-]\n%s\n\n", escapeBrackets(errorMsg)))
+
+	if errorType, ok := data.Data["errorType"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[yellow::b]Error Type:[-:-:-] %s\n", errorType))
+	} else if errType, ok := data.Data["type"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[yellow::b]Error Type:[-:-:-] %s\n", errType))
+	}
+
+	if stepName, ok := data.Data["stepName"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[cyan::b]Step:[-:-:-] %s\n", escapeBrackets(stepName)))
+	}
+
+	if details, ok := data.Data["details"].(string); ok {
+		sb.WriteString(fmt.Sprintf("[yellow::b]Details:[-:-:-]\n%s\n", escapeBrackets(details)))
+	}
+
+	if stackTrace, ok := data.Data["stackTrace"].(string); ok {
+		sb.WriteString(fmt.Sprintf("\n[yellow::b]Stack Trace:[-:-:-]\n%s\n", escapeBrackets(stackTrace)))
+	} else if stack, ok := data.Data["stack"].(string); ok {
+		sb.WriteString(fmt.Sprintf("\n[yellow::b]Stack Trace:[-:-:-]\n%s\n", escapeBrackets(stack)))
+	}
+
+	if len(data.Data) > 0 {
+		sb.WriteString("\n[cyan::b]Full Error Data:[-:-:-]\n")
+		jsonStr, _ := json.MarshalIndent(data.Data, "", "  ")
 		sb.WriteString(fmt.Sprintf("%s\n", escapeBrackets(string(jsonStr))))
 	}
 }

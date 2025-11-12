@@ -107,26 +107,21 @@ func (ap *AuthProfiler) emit(eventType ProfileEventType, name, requestID string,
 	return event.ID
 }
 
-func (ap *AuthProfiler) emitEnd(eventType ProfileEventType, name, parent string, duration int64, data map[string]any) string {
+func (ap *AuthProfiler) emitEnd(eventType ProfileEventType, name, id, parent string, start time.Time) string {
 	if ap.profiler == nil {
 		return ""
 	}
 
 	event := StepProfilerData{
-		ID:        uuid.New().String(),
+		ID:        id,
 		ParentID:  parent,
 		Type:      eventType,
 		Name:      name,
 		Step:      Step{},
 		Timestamp: time.Now(),
-		Data:      data,
-		Duration:  duration,
+		Data:      map[string]any{},
+		Duration:  time.Since(start).Microseconds(),
 	}
-
-	if event.Data == nil {
-		event.Data = make(map[string]any)
-	}
-	event.Data["authType"] = ap.authType
 
 	ap.profiler <- event
 	return event.ID
@@ -188,7 +183,10 @@ type BasicAuthenticator struct {
 func (a *BasicAuthenticator) PrepareRequest(req *http.Request, requestID string) error {
 	authID := a.profiler.emit(EVENT_AUTH_START, "Basic Auth", requestID, map[string]any{
 		"username": a.username,
+		"password": maskToken(a.password),
 	})
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_END, "Auth End", authID, requestID, startTime)
 
 	req.SetBasicAuth(a.username, a.password)
 
@@ -209,6 +207,8 @@ type BearerAuthenticator struct {
 
 func (a *BearerAuthenticator) PrepareRequest(req *http.Request, requestID string) error {
 	authID := a.profiler.emit(EVENT_AUTH_START, "Bearer Auth", requestID, nil)
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_END, "Auth End", authID, requestID, startTime)
 
 	a.profiler.emit(EVENT_AUTH_CACHED, "Using Provided Token", requestID, map[string]any{
 		"token": maskToken(a.token),
@@ -262,6 +262,8 @@ type OAuthAuthenticator struct {
 
 func (a *OAuthAuthenticator) PrepareRequest(req *http.Request, requestID string) error {
 	authID := a.profiler.emit(EVENT_AUTH_START, "OAuth2 Auth", requestID, nil)
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_END, "Auth End", authID, requestID, startTime)
 
 	token, fromCache, err := a.GetTokenWithCache(requestID)
 	if err != nil {
@@ -313,10 +315,7 @@ func (a *OAuthAuthenticator) GetTokenWithCache(requestID string) (string, bool, 
 	}
 
 	// Need to fetch new token - emit login start event
-	loginID := a.profiler.emit(EVENT_AUTH_LOGIN_START, "OAuth2 Login Request", requestID, map[string]any{
-		"method": a.method,
-	})
-
+	loginID := ""
 	if a.method == "password" {
 		loginID = a.profiler.emit(EVENT_AUTH_LOGIN_START, "OAuth2 Login Request", requestID, map[string]any{
 			"method":   a.method,
@@ -328,18 +327,18 @@ func (a *OAuthAuthenticator) GetTokenWithCache(requestID string) (string, bool, 
 			"clientId": a.clientCreds.ClientID,
 		})
 	}
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Login End", loginID, requestID, startTime)
 
 	// Fetch new token
 	var token *oauth2.Token
 	var err error
 
-	loginStart := time.Now()
 	if a.conf != nil { // Password flow
 		token, err = a.conf.PasswordCredentialsToken(ctx, a.username, a.password)
 	} else { // Client Credentials flow
 		token, err = a.clientCreds.Token(ctx)
 	}
-	loginDuration := time.Since(loginStart)
 
 	// Emit login end event
 	endData := map[string]any{
@@ -353,7 +352,7 @@ func (a *OAuthAuthenticator) GetTokenWithCache(requestID string) (string, bool, 
 			endData["expiresAt"] = token.Expiry.Format(time.RFC3339)
 		}
 	}
-	a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "OAuth2 Login Complete", loginID, loginDuration.Milliseconds(), endData)
+	a.profiler.emit(EVENT_AUTH_TOKEN_EXTRACT, "OAuth2 Login Complete", loginID, endData)
 
 	if err != nil {
 		return "", false, err
@@ -383,6 +382,8 @@ func (a *CookieAuthenticator) PrepareRequest(req *http.Request, requestID string
 	defer a.mu.Unlock()
 
 	authID := a.profiler.emit(EVENT_AUTH_START, "Cookie Auth", requestID, nil)
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_END, "Auth End", authID, requestID, startTime)
 
 	// Check if we need to authenticate
 	needsAuth := false
@@ -426,13 +427,13 @@ func (a *CookieAuthenticator) performLogin(requestID string) error {
 		"url":    a.loginRequest.URL,
 		"method": a.loginRequest.Method,
 	})
-
-	loginStart := time.Now()
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Login End", loginID, requestID, startTime)
 
 	// Build login request
 	loginReq, err := a.buildLoginRequest()
 	if err != nil {
-		a.profiler.emit(EVENT_AUTH_LOGIN_END, "Cookie Login Failed", loginID, map[string]any{
+		a.profiler.emit(EVENT_ERROR, "Cookie Login Failed", loginID, map[string]any{
 			"error": err.Error(),
 		})
 		return err
@@ -441,19 +442,15 @@ func (a *CookieAuthenticator) performLogin(requestID string) error {
 	// Execute login request
 	resp, err := a.httpClient.Do(loginReq)
 	if err != nil {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Cookie Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType": "cookie",
-			"error":    err.Error(),
+		a.profiler.emit(EVENT_ERROR, "Cookie Login Failed", loginID, map[string]any{
+			"error": err.Error(),
 		})
 		return fmt.Errorf("login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Cookie Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType":   "cookie",
+		a.profiler.emit(EVENT_ERROR, "Cookie Login Failed", loginID, map[string]any{
 			"error":      fmt.Sprintf("login request failed with status %d", resp.StatusCode),
 			"statusCode": resp.StatusCode,
 		})
@@ -467,24 +464,16 @@ func (a *CookieAuthenticator) performLogin(requestID string) error {
 			a.cookie = cookie
 			a.acquiredAt = time.Now()
 
-			loginDuration := time.Since(loginStart)
 			a.profiler.emit(EVENT_AUTH_TOKEN_EXTRACT, "Cookie Extracted", loginID, map[string]any{
 				"cookieName":  a.cookieName,
 				"cookieValue": maskToken(cookie.Value),
 			})
 
-			a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Cookie Login Complete", loginID, loginDuration.Milliseconds(), map[string]any{
-				"authType":    "cookie",
-				"cookieName":  a.cookieName,
-				"cookieValue": maskToken(cookie.Value),
-				"statusCode":  resp.StatusCode,
-			})
 			return nil
 		}
 	}
 
-	loginDuration := time.Since(loginStart)
-	a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Cookie Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
+	a.profiler.emit(EVENT_ERROR, "Cookie Login Failed", loginID, map[string]any{
 		"authType": "cookie",
 		"error":    fmt.Sprintf("cookie '%s' not found in login response", a.cookieName),
 	})
@@ -544,7 +533,9 @@ func (a *JWTAuthenticator) PrepareRequest(req *http.Request, requestID string) e
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
+	startTime := time.Now()
 	authID := a.profiler.emit(EVENT_AUTH_START, "JWT Auth", requestID, nil)
+	defer a.profiler.emitEnd(EVENT_AUTH_END, "Auth End", authID, requestID, startTime)
 
 	// Check if we need to authenticate
 	needsAuth := false
@@ -589,12 +580,13 @@ func (a *JWTAuthenticator) performLogin(requestID string) error {
 		"method": a.loginRequest.Method,
 	})
 
-	loginStart := time.Now()
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Login End", loginID, requestID, startTime)
 
 	// Build login request
 	loginReq, err := a.buildLoginRequest()
 	if err != nil {
-		a.profiler.emit(EVENT_AUTH_LOGIN_END, "JWT Login Failed", requestID, map[string]any{
+		a.profiler.emit(EVENT_ERROR, "JWT Login Failed", loginID, map[string]any{
 			"error": err.Error(),
 		})
 		return err
@@ -603,21 +595,16 @@ func (a *JWTAuthenticator) performLogin(requestID string) error {
 	// Execute login request
 	resp, err := a.httpClient.Do(loginReq)
 	if err != nil {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "JWT Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType": "jwt",
-			"error":    err.Error(),
+		a.profiler.emit(EVENT_ERROR, "JWT Login Failed", loginID, map[string]any{
+			"error": err.Error(),
 		})
 		return fmt.Errorf("login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "JWT Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType":   "jwt",
-			"error":      fmt.Sprintf("login request failed with status %d", resp.StatusCode),
-			"statusCode": resp.StatusCode,
+		a.profiler.emit(EVENT_ERROR, "JWT Login Failed", loginID, map[string]any{
+			"error": err.Error(),
 		})
 		return fmt.Errorf("login request failed with status %d", resp.StatusCode)
 	}
@@ -625,10 +612,8 @@ func (a *JWTAuthenticator) performLogin(requestID string) error {
 	// Extract token
 	token, err := a.extractToken(resp)
 	if err != nil {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "JWT Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType": "jwt",
-			"error":    err.Error(),
+		a.profiler.emit(EVENT_ERROR, "JWT Login Failed", loginID, map[string]any{
+			"error": err.Error(),
 		})
 		return err
 	}
@@ -636,18 +621,10 @@ func (a *JWTAuthenticator) performLogin(requestID string) error {
 	a.token = token
 	a.acquiredAt = time.Now()
 
-	loginDuration := time.Since(loginStart)
 	a.profiler.emit(EVENT_AUTH_TOKEN_EXTRACT, "JWT Token Extracted", requestID, map[string]any{
 		"extractFrom":     a.extractFrom,
 		"extractSelector": a.extractSelector,
 		"token":           maskToken(token),
-	})
-
-	a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "JWT Login Complete", loginID, loginDuration.Milliseconds(), map[string]any{
-		"authType":    "jwt",
-		"token":       maskToken(token),
-		"statusCode":  resp.StatusCode,
-		"extractFrom": a.extractFrom,
 	})
 	return nil
 }
@@ -774,6 +751,8 @@ func (a *CustomAuthenticator) PrepareRequest(req *http.Request, requestID string
 		"injectInto":  a.injectInto,
 		"extractFrom": a.extractFrom,
 	})
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_END, "Auth End", authID, requestID, startTime)
 
 	// Check if we need to authenticate
 	needsAuth := false
@@ -868,8 +847,8 @@ func (a *CustomAuthenticator) performLogin(requestID string) error {
 		"url":    a.loginRequest.URL,
 		"method": a.loginRequest.Method,
 	})
-
-	loginStart := time.Now()
+	startTime := time.Now()
+	defer a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Login End", loginID, requestID, startTime)
 
 	// Build login request
 	loginReq, err := a.buildLoginRequest()
@@ -883,19 +862,15 @@ func (a *CustomAuthenticator) performLogin(requestID string) error {
 	// Execute login request
 	resp, err := a.httpClient.Do(loginReq)
 	if err != nil {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Custom Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType": "custom",
-			"error":    err.Error(),
+		a.profiler.emit(EVENT_ERROR, "Custom Login Failed", loginID, map[string]any{
+			"error": err.Error(),
 		})
 		return fmt.Errorf("login request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Custom Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType":   "custom",
+		a.profiler.emit(EVENT_ERROR, "Custom Login Failed", loginID, map[string]any{
 			"error":      fmt.Sprintf("login request failed with status %d", resp.StatusCode),
 			"statusCode": resp.StatusCode,
 		})
@@ -904,23 +879,13 @@ func (a *CustomAuthenticator) performLogin(requestID string) error {
 
 	// Extract token/cookie
 	if err := a.extractCredential(resp, loginID); err != nil {
-		loginDuration := time.Since(loginStart)
-		a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Custom Login Failed", loginID, loginDuration.Milliseconds(), map[string]any{
-			"authType": "custom",
-			"error":    err.Error(),
+		a.profiler.emit(EVENT_ERROR, "Custom Login Failed", loginID, map[string]any{
+			"error": err.Error(),
 		})
 		return err
 	}
 
 	a.acquiredAt = time.Now()
-
-	loginDuration := time.Since(loginStart)
-
-	a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "Custom Login Complete", loginID, loginDuration.Milliseconds(), map[string]any{
-		"authType":    "custom",
-		"statusCode":  resp.StatusCode,
-		"extractFrom": a.extractFrom,
-	})
 	return nil
 }
 
