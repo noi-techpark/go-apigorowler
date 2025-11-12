@@ -341,7 +341,7 @@ func TestParallelErrorHandling(t *testing.T) {
 
 	// Error should be propagated, not swallowed by goroutines
 	require.NotNil(t, err, "Should return error when JSON decoding fails")
-	assert.Contains(t, err.Error(), "decoding JSON", "Error should mention JSON decoding failure")
+	assert.Contains(t, err.Error(), "error decoding response JSON", "Error should mention JSON decoding failure")
 }
 
 func TestParallelNestedParallelism(t *testing.T) {
@@ -388,8 +388,8 @@ func TestParallelNestedParallelism(t *testing.T) {
 
 func TestParallelMultiRootParallel(t *testing.T) {
 	mockTransport := crawler_testing.NewMockRoundTripper(map[string]string{
-		"https://api.example.com/users/1":    "testdata/crawler/parallel/user_1.json",
-		"https://api.example.com/users/2":    "testdata/crawler/parallel/user_2.json",
+		"https://api.example.com/users/1":      "testdata/crawler/parallel/user_1.json",
+		"https://api.example.com/users/2":      "testdata/crawler/parallel/user_2.json",
 		"https://api.example.com/products/101": "testdata/crawler/parallel/product_101.json",
 		"https://api.example.com/products/102": "testdata/crawler/parallel/product_102.json",
 	})

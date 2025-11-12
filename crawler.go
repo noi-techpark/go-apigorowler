@@ -53,6 +53,15 @@ const (
 	EVENT_PARALLELISM_SETUP
 	EVENT_ITEM_SELECTION
 
+	// Authentication events
+	EVENT_AUTH_START
+	EVENT_AUTH_CACHED
+	EVENT_AUTH_LOGIN_START
+	EVENT_AUTH_LOGIN_END
+	EVENT_AUTH_TOKEN_EXTRACT
+	EVENT_AUTH_TOKEN_INJECT
+	EVENT_AUTH_END
+
 	// Result events
 	EVENT_RESULT
 	EVENT_STREAM_RESULT
@@ -281,6 +290,7 @@ type mergeOperation struct {
 type httpRequestContext struct {
 	urlTemplate    string
 	method         string
+	requestID      string
 	headers        map[string]string
 	configuredBody map[string]any
 	bodyParams     map[string]interface{}
@@ -595,6 +605,11 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		authenticator = NewAuthenticator(*exec.step.Request.Authentication, c.httpClient)
 	}
 
+	// Set profiler on authenticator
+	if authenticator != nil && c.profiler != nil {
+		authenticator.SetProfiler(c.profiler)
+	}
+
 	// Initialize paginator
 	paginator, err := NewPaginator(ConfigP{exec.step.Request.Pagination})
 	if err != nil {
@@ -633,6 +648,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 
 		// Prepare HTTP request
 		reqCtx := httpRequestContext{
+			requestID:      pageID,
 			urlTemplate:    exec.step.Request.URL,
 			method:         exec.step.Request.Method,
 			headers:        exec.step.Request.Headers,
@@ -755,7 +771,7 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		// Decode JSON response
 		var raw interface{}
 		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-			return fmt.Errorf("error decoding JSON: %w", err)
+			return fmt.Errorf("error decoding response JSON: %w", err)
 		}
 
 		// Emit PAGINATION_EVAL event (if pagination is configured and this is not the first page)
@@ -1518,11 +1534,8 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 		mergedBody[k] = v
 	}
 
-	// Determine content type (default to JSON if not specified)
+	// Determine content type
 	contentType := ctx.contentType
-	if contentType == "" && len(mergedBody) > 0 {
-		contentType = "application/json"
-	}
 
 	// Prepare request body based on content type
 	var reqBody io.Reader
@@ -1567,7 +1580,7 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	}
 
 	// Apply authentication
-	ctx.authenticator.PrepareRequest(req)
+	ctx.authenticator.PrepareRequest(req, ctx.requestID)
 
 	return req, urlObj, nil
 }

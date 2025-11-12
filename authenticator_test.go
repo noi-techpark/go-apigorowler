@@ -25,7 +25,7 @@ func TestBasicAuthenticator(t *testing.T) {
 	auth := NewAuthenticator(config, nil)
 	req, _ := http.NewRequest("GET", "https://example.com", nil)
 
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	username, password, ok := req.BasicAuth()
@@ -43,7 +43,7 @@ func TestBearerAuthenticator(t *testing.T) {
 	auth := NewAuthenticator(config, nil)
 	req, _ := http.NewRequest("GET", "https://example.com", nil)
 
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	authHeader := req.Header.Get("Authorization")
@@ -58,7 +58,7 @@ func TestNoopAuthenticator(t *testing.T) {
 	auth := NewAuthenticator(config, nil)
 	req, _ := http.NewRequest("GET", "https://example.com", nil)
 
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	// Should not add any authentication headers
@@ -90,6 +90,9 @@ func TestCookieAuthenticator(t *testing.T) {
 		LoginRequest: &RequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
 			Body: map[string]any{
 				"username": "testuser",
 				"password": "testpass",
@@ -103,7 +106,7 @@ func TestCookieAuthenticator(t *testing.T) {
 
 	// First request should perform login
 	req1, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req1)
+	err := auth.PrepareRequest(req1, "")
 	require.Nil(t, err)
 
 	// Check that cookie is set
@@ -114,7 +117,7 @@ func TestCookieAuthenticator(t *testing.T) {
 
 	// Second request should reuse the same cookie without login
 	req2, _ := http.NewRequest("GET", "https://api.example.com/data2", nil)
-	err = auth.PrepareRequest(req2)
+	err = auth.PrepareRequest(req2, "")
 	require.Nil(t, err)
 
 	cookies2 := req2.Cookies()
@@ -156,7 +159,7 @@ func TestCookieAuthenticatorOnePerRun(t *testing.T) {
 	// Multiple requests should only login once
 	for i := 0; i < 3; i++ {
 		req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-		err := auth.PrepareRequest(req)
+		err := auth.PrepareRequest(req, "")
 		require.Nil(t, err)
 	}
 
@@ -194,7 +197,7 @@ func TestJWTAuthenticatorFromBody(t *testing.T) {
 	auth := NewAuthenticator(config, client)
 
 	req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	authHeader := req.Header.Get("Authorization")
@@ -228,7 +231,7 @@ func TestJWTAuthenticatorFromHeader(t *testing.T) {
 	auth := NewAuthenticator(config, client)
 
 	req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	authHeader := req.Header.Get("Authorization")
@@ -276,7 +279,7 @@ func TestJWTAuthenticatorRefresh(t *testing.T) {
 
 	// First request
 	req1, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req1)
+	err := auth.PrepareRequest(req1, "")
 	require.Nil(t, err)
 	assert.Contains(t, req1.Header.Get("Authorization"), "initial-token")
 
@@ -285,7 +288,7 @@ func TestJWTAuthenticatorRefresh(t *testing.T) {
 
 	// Second request should refresh
 	req2, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err = auth.PrepareRequest(req2)
+	err = auth.PrepareRequest(req2, "")
 	require.Nil(t, err)
 	assert.Contains(t, req2.Header.Get("Authorization"), "refreshed-token")
 
@@ -325,7 +328,7 @@ func TestCustomAuthenticatorCookieToHeader(t *testing.T) {
 	auth := NewAuthenticator(config, client)
 
 	req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	authHeader := req.Header.Get("X-Custom-Auth")
@@ -360,7 +363,7 @@ func TestCustomAuthenticatorBodyToquery(t *testing.T) {
 	auth := NewAuthenticator(config, client)
 
 	req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	query := req.URL.Query().Get("api_key")
@@ -395,7 +398,7 @@ func TestCustomAuthenticatorHeaderToBearer(t *testing.T) {
 	auth := NewAuthenticator(config, client)
 
 	req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	authHeader := req.Header.Get("Authorization")
@@ -434,7 +437,7 @@ func TestCustomAuthenticatorCookieToCookie(t *testing.T) {
 	auth := NewAuthenticator(config, client)
 
 	req, _ := http.NewRequest("GET", "https://api.example.com/data", nil)
-	err := auth.PrepareRequest(req)
+	err := auth.PrepareRequest(req, "")
 	require.Nil(t, err)
 
 	cookies := req.Cookies()
