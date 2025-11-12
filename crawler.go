@@ -65,6 +65,9 @@ const (
 	// Result events
 	EVENT_RESULT
 	EVENT_STREAM_RESULT
+
+	// Errors
+	EVENT_ERROR
 )
 
 type StepProfilerData struct {
@@ -366,7 +369,11 @@ func NewApiCrawler(configPath string) (*ApiCrawler, []ValidationError, error) {
 	if cfg.Authentication != nil {
 		c.globalAuthenticator = NewAuthenticator(*cfg.Authentication, c.httpClient)
 	} else {
-		c.globalAuthenticator = NoopAuthenticator{}
+		c.globalAuthenticator = NoopAuthenticator{
+			BaseAuthenticator: &BaseAuthenticator{
+				profiler: &AuthProfiler{authType: "cookie"},
+			},
+		}
 	}
 	return c, nil, nil
 }

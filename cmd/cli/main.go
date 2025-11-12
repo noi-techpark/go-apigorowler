@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/noi-techpark/go-apigorowler"
 )
@@ -49,14 +50,17 @@ func main() {
 		return
 	}
 
+	var wg sync.WaitGroup
+
 	// Enable profiler if requested
 	var profilerChan chan apigorowler.StepProfilerData
 	if *profilerFlag {
 		profilerChan = crawler.EnableProfiler()
-		defer close(profilerChan)
+		wg.Add(1)
 
 		// Output profiler data as JSON
 		go func() {
+			defer wg.Done()
 			for data := range profilerChan {
 				jsonData, err := json.Marshal(data)
 				if err != nil {
@@ -83,8 +87,9 @@ func main() {
 					log.Printf("Failed to marshal stream entity: %v", err)
 					continue
 				}
-				// Prefix with STREAM: so extension can distinguish from profiler data
-				fmt.Printf("STREAM: %s\n", string(jsonEntity))
+				if !*profilerFlag {
+					fmt.Printf("STREAM: %s\n", string(jsonEntity))
+				}
 			}
 			streamDone <- true
 		}()
@@ -103,17 +108,17 @@ func main() {
 		<-streamDone
 	}
 
+	// Close profilerChan to signal the consumer goroutine to exit
+	if *profilerFlag {
+		close(profilerChan)
+		wg.Wait() // ✅ Wait until all profiler data is consumed
+	}
+
 	// Get result from crawler context
 	result := crawler.GetData()
 
-	// Output result as JSON (if not in profiler mode and not in stream mode)
-	if !*profilerFlag && !crawler.Config.Stream {
-		jsonResult, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			log.Fatalf("Failed to marshal result: %v", err)
-		}
-		fmt.Println(string(jsonResult))
-	} else if !crawler.Config.Stream {
+	// Output result as JSON (if not in stream mode and not profile mode)
+	if !crawler.Config.Stream && !*profilerFlag {
 		// In profiler mode without streaming, output final result after profiler data
 		jsonResult, err := json.Marshal(result)
 		if err != nil {

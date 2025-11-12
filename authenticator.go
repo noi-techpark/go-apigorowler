@@ -40,6 +40,38 @@ func getContentType(headers map[string]string) string {
 	return ""
 }
 
+// encodeRequestBody encodes a request body based on Content-Type header
+// Returns nil reader if body is empty, error if Content-Type is missing or unsupported
+func encodeRequestBody(headers map[string]string, body map[string]any) (*bytes.Reader, error) {
+	if len(body) == 0 {
+		return nil, nil
+	}
+
+	contentType := getContentType(headers)
+	if contentType == "" {
+		return nil, fmt.Errorf("Content-Type header is required when body is present")
+	}
+
+	switch contentType {
+	case "application/json":
+		bodyJSON, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("error encoding JSON body: %w", err)
+		}
+		return bytes.NewReader(bodyJSON), nil
+
+	case "application/x-www-form-urlencoded":
+		formData := url.Values{}
+		for k, v := range body {
+			formData.Set(k, fmt.Sprintf("%v", v))
+		}
+		return bytes.NewReader([]byte(formData.Encode())), nil
+
+	default:
+		return nil, fmt.Errorf("unsupported content type: %s", contentType)
+	}
+}
+
 type Authenticator interface {
 	PrepareRequest(req *http.Request, requestID string) error
 	SetProfiler(profiler chan StepProfilerData)
@@ -154,7 +186,7 @@ type BasicAuthenticator struct {
 }
 
 func (a *BasicAuthenticator) PrepareRequest(req *http.Request, requestID string) error {
-	a.profiler.emit(EVENT_AUTH_START, "Basic Auth", requestID, map[string]any{
+	authID := a.profiler.emit(EVENT_AUTH_START, "Basic Auth", requestID, map[string]any{
 		"username": a.username,
 	})
 
@@ -176,7 +208,7 @@ type BearerAuthenticator struct {
 }
 
 func (a *BearerAuthenticator) PrepareRequest(req *http.Request, requestID string) error {
-	a.profiler.emit(EVENT_AUTH_START, "Bearer Auth", requestID, nil)
+	authID := a.profiler.emit(EVENT_AUTH_START, "Bearer Auth", requestID, nil)
 
 	a.profiler.emit(EVENT_AUTH_CACHED, "Using Provided Token", requestID, map[string]any{
 		"token": maskToken(a.token),
@@ -218,14 +250,20 @@ type OAuthConfig struct {
 // OAuthAuthenticator - OAuth2 authentication
 type OAuthAuthenticator struct {
 	*BaseAuthenticator
-	provider *OAuthProvider
-	profiler *AuthProfiler
+	conf        *oauth2.Config
+	clientCreds *clientcredentials.Config
+	token       *oauth2.Token
+	mu          sync.Mutex
+	username    string
+	password    string
+	method      string // password or client_credentials
+	httpClient  HTTPClient
 }
 
 func (a *OAuthAuthenticator) PrepareRequest(req *http.Request, requestID string) error {
-	a.profiler.emit(EVENT_AUTH_START, "OAuth2 Auth", requestID, nil)
+	authID := a.profiler.emit(EVENT_AUTH_START, "OAuth2 Auth", requestID, nil)
 
-	token, fromCache, err := a.provider.GetTokenWithCache()
+	token, fromCache, err := a.GetTokenWithCache(requestID)
 	if err != nil {
 		a.profiler.emit(EVENT_AUTH_END, "OAuth2 Auth Failed", requestID, map[string]any{
 			"error": err.Error(),
@@ -252,100 +290,43 @@ func (a *OAuthAuthenticator) PrepareRequest(req *http.Request, requestID string)
 	return nil
 }
 
-func (a *OAuthAuthenticator) SetProfiler(profiler chan StepProfilerData) {
-	a.profiler.profiler = profiler
-	a.provider.profiler = profiler
-}
-
-// OAuthProvider struct
-type OAuthProvider struct {
-	conf        *oauth2.Config
-	clientCreds *clientcredentials.Config
-	token       *oauth2.Token
-	mu          sync.Mutex
-	username    string
-	password    string
-	profiler    chan StepProfilerData
-	method      string // password or client_credentials
-}
-
-func NewOAuthProvider(cfg OAuthConfig, username, password string) *OAuthProvider {
-	authMethod := cfg.Method
-	tokenURL := cfg.TokenURL
-	clientID := cfg.ClientID
-	clientSecret := cfg.ClientSecret
-
-	wrapper := &OAuthProvider{
-		username: username,
-		password: password,
-		method:   authMethod,
-	}
-
-	switch authMethod {
-	case "password":
-		wrapper.conf = &oauth2.Config{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			Endpoint: oauth2.Endpoint{
-				TokenURL: tokenURL,
-			},
-			Scopes: cfg.Scopes,
-		}
-	case "client_credentials":
-		wrapper.clientCreds = &clientcredentials.Config{
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			TokenURL:     tokenURL,
-			Scopes:       cfg.Scopes,
-		}
-	default:
-		slog.Error("Unsupported OAUTH_METHOD. Use 'password' or 'client_credentials'")
-		panic("Unsupported OAUTH_METHOD. Use 'password' or 'client_credentials'")
-	}
-
-	return wrapper
-}
-
 // GetToken retrieves a valid access token (refreshing if necessary)
-func (w *OAuthProvider) GetToken() (string, error) {
-	token, _, err := w.GetTokenWithCache()
+func (a *OAuthAuthenticator) GetToken(requestID string) (string, error) {
+	token, _, err := a.GetTokenWithCache(requestID)
 	return token, err
 }
 
 // GetTokenWithCache retrieves a valid access token and returns whether it was cached
-func (w *OAuthProvider) GetTokenWithCache() (string, bool, error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
+func (a *OAuthAuthenticator) GetTokenWithCache(requestID string) (string, bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 
+	// Create context with HTTP client for OAuth2 library
 	ctx := context.Background()
+	if a.httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, a.httpClient)
+	}
 
 	// If token exists and is still valid, return it as cached
-	if w.token != nil && w.token.Valid() {
-		return w.token.AccessToken, true, nil
+	if a.token != nil && a.token.Valid() {
+		return a.token.AccessToken, true, nil
 	}
 
 	// Need to fetch new token - emit login start event
-	loginID := ""
-	if w.profiler != nil {
-		event := StepProfilerData{
-			ID:        uuid.New().String(),
-			Type:      EVENT_AUTH_LOGIN_START,
-			Name:      "OAuth2 Login Request",
-			Timestamp: time.Now(),
-			Data: map[string]any{
-				"authType": "oauth",
-				"method":   w.method,
-			},
-		}
-		if w.method == "password" {
-			event.Data["username"] = w.username
-		} else if w.method == "client_credentials" {
-			if w.clientCreds != nil {
-				event.Data["clientId"] = w.clientCreds.ClientID
-			}
-		}
-		w.profiler <- event
-		loginID = event.ID
+	loginID := a.profiler.emit(EVENT_AUTH_LOGIN_START, "OAuth2 Login Request", requestID, map[string]any{
+		"method": a.method,
+	})
+
+	if a.method == "password" {
+		loginID = a.profiler.emit(EVENT_AUTH_LOGIN_START, "OAuth2 Login Request", requestID, map[string]any{
+			"method":   a.method,
+			"username": a.username,
+		})
+	} else if a.method == "client_credentials" && a.clientCreds != nil {
+		loginID = a.profiler.emit(EVENT_AUTH_LOGIN_START, "OAuth2 Login Request", requestID, map[string]any{
+			"method":   a.method,
+			"clientId": a.clientCreds.ClientID,
+		})
 	}
 
 	// Fetch new token
@@ -353,44 +334,33 @@ func (w *OAuthProvider) GetTokenWithCache() (string, bool, error) {
 	var err error
 
 	loginStart := time.Now()
-	if w.conf != nil { // Password flow
-		token, err = w.conf.PasswordCredentialsToken(ctx, w.username, w.password)
+	if a.conf != nil { // Password flow
+		token, err = a.conf.PasswordCredentialsToken(ctx, a.username, a.password)
 	} else { // Client Credentials flow
-		token, err = w.clientCreds.Token(ctx)
+		token, err = a.clientCreds.Token(ctx)
 	}
 	loginDuration := time.Since(loginStart)
 
 	// Emit login end event
-	if w.profiler != nil {
-		event := StepProfilerData{
-			ID:        uuid.New().String(),
-			ParentID:  loginID,
-			Type:      EVENT_AUTH_LOGIN_END,
-			Name:      "OAuth2 Login Complete",
-			Timestamp: time.Now(),
-			Duration:  loginDuration.Milliseconds(),
-			Data: map[string]any{
-				"authType": "oauth",
-				"method":   w.method,
-			},
-		}
-		if err != nil {
-			event.Data["error"] = err.Error()
-		} else {
-			event.Data["token"] = maskToken(token.AccessToken)
-			if !token.Expiry.IsZero() {
-				event.Data["expiresAt"] = token.Expiry.Format(time.RFC3339)
-			}
-		}
-		w.profiler <- event
+	endData := map[string]any{
+		"method": a.method,
 	}
+	if err != nil {
+		endData["error"] = err.Error()
+	} else {
+		endData["token"] = maskToken(token.AccessToken)
+		if !token.Expiry.IsZero() {
+			endData["expiresAt"] = token.Expiry.Format(time.RFC3339)
+		}
+	}
+	a.profiler.emitEnd(EVENT_AUTH_LOGIN_END, "OAuth2 Login Complete", loginID, loginDuration.Milliseconds(), endData)
 
 	if err != nil {
 		return "", false, err
 	}
 
 	// Store new token
-	w.token = token
+	a.token = token
 	return token.AccessToken, false, nil
 }
 
@@ -530,28 +500,9 @@ func (a *CookieAuthenticator) buildLoginRequest() (*http.Request, error) {
 	}
 
 	// Build body
-	var bodyReader *bytes.Reader
-	if len(a.loginRequest.Body) > 0 {
-		contentType := getContentType(a.loginRequest.Headers)
-		switch contentType {
-
-		case "application/json":
-			bodyJSON, err := json.Marshal(a.loginRequest.Body)
-			if err != nil {
-				return nil, fmt.Errorf("error encoding JSON body: %w", err)
-			}
-			bodyReader = bytes.NewReader(bodyJSON)
-
-		case "application/x-www-form-urlencoded":
-			formData := url.Values{}
-			for k, v := range a.loginRequest.Body {
-				formData.Set(k, fmt.Sprintf("%v", v))
-			}
-			bodyReader = bytes.NewReader([]byte(formData.Encode()))
-
-		default:
-			return nil, fmt.Errorf("unsupported content type: %s", contentType)
-		}
+	bodyReader, err := encodeRequestBody(a.loginRequest.Headers, a.loginRequest.Body)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create request
@@ -568,13 +519,6 @@ func (a *CookieAuthenticator) buildLoginRequest() (*http.Request, error) {
 	// Set headers
 	for k, v := range a.loginRequest.Headers {
 		req.Header.Set(k, v)
-	}
-	if bodyReader != nil {
-		contentType := getContentType(a.loginRequest.Headers)
-		if contentType == "" {
-			contentType = "application/json"
-		}
-		req.Header.Set("Content-Type", contentType)
 	}
 
 	return req, nil
@@ -600,7 +544,7 @@ func (a *JWTAuthenticator) PrepareRequest(req *http.Request, requestID string) e
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.profiler.emit(EVENT_AUTH_START, "JWT Auth", requestID, nil)
+	authID := a.profiler.emit(EVENT_AUTH_START, "JWT Auth", requestID, nil)
 
 	// Check if we need to authenticate
 	needsAuth := false
@@ -779,13 +723,9 @@ func (a *JWTAuthenticator) buildLoginRequest() (*http.Request, error) {
 	}
 
 	// Build body
-	var bodyReader *bytes.Reader
-	if len(a.loginRequest.Body) > 0 {
-		bodyJSON, err := json.Marshal(a.loginRequest.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal login body: %w", err)
-		}
-		bodyReader = bytes.NewReader(bodyJSON)
+	bodyReader, err := encodeRequestBody(a.loginRequest.Headers, a.loginRequest.Body)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create request
@@ -802,13 +742,6 @@ func (a *JWTAuthenticator) buildLoginRequest() (*http.Request, error) {
 	// Set headers
 	for k, v := range a.loginRequest.Headers {
 		req.Header.Set(k, v)
-	}
-	if bodyReader != nil {
-		contentType := getContentType(a.loginRequest.Headers)
-		if contentType == "" {
-			contentType = "application/json"
-		}
-		req.Header.Set("Content-Type", contentType)
 	}
 
 	return req, nil
@@ -837,7 +770,7 @@ func (a *CustomAuthenticator) PrepareRequest(req *http.Request, requestID string
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	a.profiler.emit(EVENT_AUTH_START, "Custom Auth", requestID, map[string]any{
+	authID := a.profiler.emit(EVENT_AUTH_START, "Custom Auth", requestID, map[string]any{
 		"injectInto":  a.injectInto,
 		"extractFrom": a.extractFrom,
 	})
@@ -1090,13 +1023,9 @@ func (a *CustomAuthenticator) buildLoginRequest() (*http.Request, error) {
 	}
 
 	// Build body
-	var bodyReader *bytes.Reader
-	if len(a.loginRequest.Body) > 0 {
-		bodyJSON, err := json.Marshal(a.loginRequest.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal login body: %w", err)
-		}
-		bodyReader = bytes.NewReader(bodyJSON)
+	bodyReader, err := encodeRequestBody(a.loginRequest.Headers, a.loginRequest.Body)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create request
@@ -1114,13 +1043,6 @@ func (a *CustomAuthenticator) buildLoginRequest() (*http.Request, error) {
 	for k, v := range a.loginRequest.Headers {
 		req.Header.Set(k, v)
 	}
-	if bodyReader != nil {
-		contentType := getContentType(a.loginRequest.Headers)
-		if contentType == "" {
-			contentType = "application/json"
-		}
-		req.Header.Set("Content-Type", contentType)
-	}
 
 	return req, nil
 }
@@ -1128,7 +1050,11 @@ func (a *CustomAuthenticator) buildLoginRequest() (*http.Request, error) {
 // NewAuthenticator creates an authenticator based on the configuration
 func NewAuthenticator(config AuthenticatorConfig, httpClient HTTPClient) Authenticator {
 	if config.Type == "" {
-		return &NoopAuthenticator{}
+		return &NoopAuthenticator{
+			BaseAuthenticator: &BaseAuthenticator{
+				profiler: &AuthProfiler{authType: "cookie"},
+			},
+		}
 	}
 
 	switch config.Type {
@@ -1150,12 +1076,44 @@ func NewAuthenticator(config AuthenticatorConfig, httpClient HTTPClient) Authent
 		}
 
 	case "oauth":
-		return &OAuthAuthenticator{
-			provider: NewOAuthProvider(config.OAuthConfig, config.Username, config.Password),
+		authMethod := config.Method
+		tokenURL := config.TokenURL
+		clientID := config.ClientID
+		clientSecret := config.ClientSecret
+
+		auth := &OAuthAuthenticator{
+			username:   config.Username,
+			password:   config.Password,
+			method:     authMethod,
+			httpClient: httpClient,
 			BaseAuthenticator: &BaseAuthenticator{
 				profiler: &AuthProfiler{authType: "oauth"},
 			},
 		}
+
+		switch authMethod {
+		case "password":
+			auth.conf = &oauth2.Config{
+				ClientID:     clientID,
+				ClientSecret: clientSecret,
+				Endpoint: oauth2.Endpoint{
+					TokenURL: tokenURL,
+				},
+				Scopes: config.Scopes,
+			}
+		case "client_credentials":
+			auth.clientCreds = &clientcredentials.Config{
+				ClientID:     clientID,
+				ClientSecret: clientSecret,
+				TokenURL:     tokenURL,
+				Scopes:       config.Scopes,
+			}
+		default:
+			slog.Error("Unsupported OAUTH_METHOD. Use 'password' or 'client_credentials'")
+			panic("Unsupported OAUTH_METHOD. Use 'password' or 'client_credentials'")
+		}
+
+		return auth
 
 	case "cookie":
 		maxAge := time.Duration(config.MaxAgeSeconds) * time.Second
