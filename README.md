@@ -392,9 +392,7 @@ Iterates over an array or list of values, creating a new child context for each 
 | `path`              | jq expression        | **Required.** Path to the array to iterate over      |
 | `as`                | string               | **Required.** Variable name for each item in context |
 | `values`            | array<any>           | Optional. Static values to iterate over. When using values, access current value via `.[ctx-name].value` (see [example](./examples/foreach-iteration.yaml)) |
-| `parallel`          | bool                 | Optional. Enable parallel execution of iterations (default: false) |
-| `maxConcurrency`    | int                  | Optional. Max concurrent workers for parallel execution (default: 10) |
-| `rateLimit`         | [RateLimitConfig](#ratelimitconfig) | Optional. Rate limiting for API calls |
+| `parallelism`       | [ParallelismConfig](#parallelismconfig) | Optional. Parallel execution configuration |
 | `steps`             | Array<[ForeachStep](#foreachstep)\|[RequestStep](#requeststep)> | Optional. Nested steps |
 | `mergeWithParentOn` | jq expression        | Optional. Rule for merging with parent context       |
 | `mergeOn`           | jq expression        | Optional. Rule for merging with current context      |
@@ -408,9 +406,8 @@ Iterates over an array or list of values, creating a new child context for each 
 - type: forEach
   path: .users
   as: user
-  parallel: true
-  maxConcurrency: 5
-  rateLimit:
+  parallelism:
+    maxConcurrency: 5
     requestsPerSecond: 10
     burst: 2
   steps:
@@ -420,14 +417,17 @@ Iterates over an array or list of values, creating a new child context for each 
 
 ---
 
-### RateLimitConfig
+### ParallelismConfig
 
-Controls the rate of API requests to prevent overwhelming target servers.
+Controls parallel execution of forEach iterations.
 
 | Field               | Type    | Description                                          |
 | ------------------- | ------- | ---------------------------------------------------- |
-| `requestsPerSecond` | float64 | **Required.** Maximum requests per second            |
+| `maxConcurrency`    | int     | Optional. Maximum concurrent workers (default: 10)   |
+| `requestsPerSecond` | float64 | Optional. Maximum requests per second for rate limiting |
 | `burst`             | int     | Optional. Burst size for temporary rate exceeding (default: 1) |
+
+When `parallelism` is present on a forEach step, iterations will be executed in parallel using a worker pool. The `maxConcurrency` setting limits how many iterations run concurrently. Rate limiting is applied if `requestsPerSecond` is specified.
 
 ---
 
