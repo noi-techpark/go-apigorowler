@@ -808,12 +808,14 @@ func (c *ApiCrawler) handleRequest(ctx context.Context, exec *stepExecution) err
 		}
 
 		// Execute nested steps on transformed result
+		var childContextMap map[string]*Context = nil
 		thisContextKey := exec.currentContextKey
 		if exec.step.As != "" {
 			thisContextKey = exec.step.As
+			childContextMap = childMapWith(exec.contextMap, exec.currentContext, thisContextKey, transformed)
+		} else {
+			childContextMap = childMapWithClonedContext(exec.contextMap, exec.currentContext, transformed)
 		}
-
-		childContextMap := childMapWith(exec.contextMap, exec.currentContext, thisContextKey, transformed)
 
 		// Emit CONTEXT_SELECTION event (context created for nested steps)
 		if c.profiler != nil && len(exec.step.Steps) > 0 {
@@ -1580,6 +1582,24 @@ func childMapWith(base map[string]*Context, currentCotnext *Context, key string,
 		ParentContext: currentCotnext.key,
 		key:           key,
 		depth:         currentCotnext.depth + 1,
+	}
+	return newMap
+}
+
+func childMapWithClonedContext(base map[string]*Context, currentCotnext *Context, value interface{}) map[string]*Context {
+	newMap := make(map[string]*Context, len(base)+1)
+	for k, v := range base {
+		// exclude current contex, we will create copy later
+		if k == currentCotnext.key {
+			continue
+		}
+		newMap[k] = v
+	}
+	newMap[currentCotnext.key] = &Context{
+		Data:          value,
+		ParentContext: currentCotnext.ParentContext,
+		key:           currentCotnext.key,
+		depth:         currentCotnext.depth,
 	}
 	return newMap
 }
