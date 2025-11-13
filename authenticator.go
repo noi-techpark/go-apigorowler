@@ -159,7 +159,7 @@ type AuthenticatorConfig struct {
 	Token string `yaml:"token,omitempty" json:"token,omitempty"`
 
 	// OAuth (inlined for backward compatibility)
-	OAuthConfig `yaml:"oauth,omitempty" json:"oauth,omitempty"`
+	OAuthConfig `yaml:",inline" json:",inline"`
 
 	// Cookie/JWT/Custom auth
 	LoginRequest    *RequestConfig `yaml:"loginRequest,omitempty" json:"loginRequest,omitempty"`
