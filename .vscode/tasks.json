@@ -4,6 +4,7 @@
     {
       "type": "npm",
       "script": "compile",
+      "path": "vscode-extension/",
       "group": "build",
       "presentation": {
         "reveal": "silent"
@@ -13,6 +14,7 @@
     {
       "type": "npm",
       "script": "watch",
+      "path": "vscode-extension/",
       "isBackground": true,
       "group": {
         "kind": "build",
@@ -21,11 +23,26 @@
       "presentation": {
         "reveal": "silent"
       },
-      "problemMatcher": "$tsc-watch"
+      "problemMatcher": {
+        "owner": "esbuild",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^\\s+(.*):(\\d+):(\\d+):$",
+          "file": 1,
+          "line": 2,
+          "column": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^\\[watch\\] build started",
+          "endsPattern": "^\\[watch\\] build finished"
+        }
+      }
     },
     {
       "type": "npm",
       "script": "lint",
+      "path": "vscode-extension/",
       "problemMatcher": "$eslint-stylish"
     }
   ]

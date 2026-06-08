@@ -71,9 +71,17 @@ type RequestConfig struct {
 	URL            string               `yaml:"url" json:"url"`
 	Method         string               `yaml:"method" json:"method"`
 	Headers        map[string]string    `yaml:"headers,omitempty" json:"headers,omitempty"`
-	Body           map[string]any       `yaml:"body,omitempty" json:"body,omitempty"`
+	Body           string               `yaml:"body,omitempty" json:"body,omitempty"`
 	Pagination     Pagination           `yaml:"pagination,omitempty" json:"pagination,omitempty"`
 	Authentication *AuthenticatorConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+// AuthRequestConfig is used for authentication login requests where body is a static map
+type AuthRequestConfig struct {
+	URL     string            `yaml:"url" json:"url"`
+	Method  string            `yaml:"method" json:"method"`
+	Headers map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Body    map[string]any    `yaml:"body,omitempty" json:"body,omitempty"`
 }
 
 type MergeWithContextRule struct {
@@ -104,7 +112,7 @@ type httpRequestContext struct {
 	method         string
 	requestID      string
 	headers        map[string]string
-	configuredBody map[string]any
+	configuredBody string
 	bodyParams     map[string]interface{}
 	contentType    string
 	queryParams    map[string]string
@@ -1034,26 +1042,20 @@ func (c *ApiCrawler) prepareHTTPRequest(ctx httpRequestContext, templateCtx map[
 	// This preserves existing params as-is (no decode/re-encode round-trip).
 	SetQueryParams(urlObj, ctx.queryParams)
 
-	// Merge configured body with pagination body params
+	// Evaluate body jq expression
 	mergedBody := make(map[string]any)
 
-	// Configured body: use pre-compiled templates if available, else use raw values
-	if ctx.compiledStep != nil && ctx.compiledStep.BodyTemplates != nil {
-		expandedBody, err := ctx.compiledStep.ExecuteBodyTemplates(templateCtx)
+	if ctx.compiledStep != nil && ctx.compiledStep.Body != nil {
+		bodyResult, err := ctx.compiledStep.ExecuteBody(templateCtx)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("error expanding body: %w", err)
+			return nil, nil, nil, fmt.Errorf("error evaluating body: %w", err)
 		}
-		for k, v := range expandedBody {
-			mergedBody[k] = v
-		}
-	} else {
-		// No templates in body, use raw values
-		for k, v := range ctx.configuredBody {
+		for k, v := range bodyResult {
 			mergedBody[k] = v
 		}
 	}
 
-	// Add pagination body params (dynamic, use raw values - pagination doesn't use templates)
+	// Add pagination body params (override body jq values)
 	for k, v := range ctx.bodyParams {
 		mergedBody[k] = v
 	}

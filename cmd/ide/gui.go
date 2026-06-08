@@ -194,7 +194,8 @@ func getHelpText() string {
   [yellow]PgUp/PgDn[-]     Scroll page by page
   [yellow]Home/End[-]      Jump to top/bottom
 
-[yellow]Press [::b]?[-:-:-] or [::b]Esc[-:-:-] to close this help`
+[yellow]Press [::b]?[-:-:-] or [::b]Esc[-:-:-] to close this help
+[yellow]Press [::b]f[-:-:-] to view Template & jq Functions Reference`
 }
 
 // Generate a tview-color-tagged diff from before/after strings
@@ -525,6 +526,9 @@ func (c *ConsoleApp) gotoIDE(path string) {
 			case '?':
 				c.toggleHelp()
 				return nil
+			case 'f':
+				c.toggleFunctionsReference()
+				return nil
 			case 's':
 				c.stopExec()
 				return nil
@@ -574,6 +578,10 @@ func (c *ConsoleApp) gotoIDE(path string) {
 			// Close help if open
 			if c.pages.HasPage("help") {
 				c.pages.HidePage("help")
+			}
+			// Close functions reference if open
+			if c.pages.HasPage("functions") {
+				c.pages.RemovePage("functions")
 			}
 			return nil
 		}
@@ -794,6 +802,132 @@ func (c *ConsoleApp) collapseSubtree(node *tview.TreeNode) {
 	collapse(node)
 }
 
+func getFunctionsReferenceText() string {
+	return `[yellow::b]Template & jq Functions Reference[-:-:-]
+
+[green::b]Where to Use[-:-:-]
+  [yellow]Go Templates + Sprig[-]   url, headers, body (first pass)
+  [yellow]jq Expressions[-]         body (second pass), resultTransformer,
+                           mergeOn, mergeWithParentOn, mergeWithContext, path
+  [yellow]Env Expansion[-]          Everywhere in YAML (before parsing)
+                           ${VAR} or ${VAR:-default}
+
+[green::b]Sprig — String Functions[-:-:-]
+  [yellow]upper / lower[-]          "hello" | upper → "HELLO"
+  [yellow]trim[-]                   "  hi  " | trim → "hi"
+  [yellow]trimPrefix / trimSuffix[-] "hello" | trimPrefix "hel" → "lo"
+  [yellow]replace[-]                "hi" | replace "i" "ello" → "hello"
+  [yellow]contains[-]               contains "ell" "hello" → true
+  [yellow]hasPrefix / hasSuffix[-]  hasPrefix "hel" "hello" → true
+  [yellow]repeat[-]                 "ab" | repeat 3 → "ababab"
+  [yellow]nospace[-]                "h e l lo" | nospace → "hello"
+  [yellow]substr[-]                 substr 0 3 "hello" → "hel"
+  [yellow]quote / squote[-]         "hi" | quote → "\"hi\""
+  [yellow]snakecase / camelcase[-]  "myVar" | snakecase → "my_var"
+  [yellow]kebabcase[-]              "myVar" | kebabcase → "my-var"
+
+[green::b]Sprig — Math Functions[-:-:-]
+  [yellow]add / sub / mul / div[-]  add 3 2 → 5, mul .from 1000
+  [yellow]mod[-]                    mod 10 3 → 1
+  [yellow]max / min[-]              max 5 3 → 5
+  [yellow]floor / ceil / round[-]   3.7 | floor → 3
+
+[green::b]Sprig — Date/Time Functions[-:-:-]
+  [yellow]now[-]                    Current time
+  [yellow]date[-]                   now | date "2006-01-02" → "2026-04-01"
+  [yellow]dateModify[-]             now | dateModify "8760h" (add ~1 year)
+  [yellow]unixEpoch[-]              now | unixEpoch → 1743465600
+  [yellow]dateInZone[-]             dateInZone "2006-01-02" (now) "UTC"
+  [yellow]toDate[-]                 toDate "2006-01-02" "2026-01-15"
+
+[green::b]Sprig — Logic & Default[-:-:-]
+  [yellow]default[-]                default "N/A" .value
+  [yellow]empty[-]                  empty "" → true
+  [yellow]ternary[-]                ternary "yes" "no" true → "yes"
+  [yellow]coalesce[-]               coalesce .a .b "fallback"
+
+[green::b]Sprig — Type Conversion[-:-:-]
+  [yellow]toString / toInt[-]       42 | toString → "42"
+  [yellow]toFloat64[-]              "3.14" | toFloat64 → 3.14
+  [yellow]toJson / toPrettyJson[-]  .obj | toJson → JSON string
+
+[green::b]Sprig — Encoding[-:-:-]
+  [yellow]b64enc / b64dec[-]        "hello" | b64enc → "aGVsbG8="
+
+[green::b]Sprig — Formatting[-:-:-]
+  [yellow]printf[-]                 printf "/Date(%d+0000)/" .epoch
+
+[green::b]Sprig — List Functions[-:-:-]
+  [yellow]list[-]                   list "a" "b" "c"
+  [yellow]first / last[-]           first (list 1 2 3) → 1
+  [yellow]join[-]                   list "a" "b" | join ","  → "a,b"
+  [yellow]sortAlpha[-]              list "b" "a" | sortAlpha → ["a","b"]
+
+[green::b]jq — Path & Selection[-:-:-]
+  [yellow].field[-]                 Access object field
+  [yellow].field.nested[-]          Nested field access
+  [yellow].[n][-]                   Array index
+  [yellow].[][-]                    Iterate array
+  [yellow].[n:m][-]                 Array slice
+  [yellow]select(cond)[-]           Filter: select(.age > 18)
+
+[green::b]jq — Array/Object Operations[-:-:-]
+  [yellow]map(expr)[-]              Apply to each: map(.id)
+  [yellow]length[-]                 Array/string length
+  [yellow]keys / values[-]          Object keys/values
+  [yellow]has("key")[-]             Check key exists
+  [yellow]unique_by(.f)[-]          Deduplicate by field
+  [yellow]group_by(.f)[-]           Group by field
+  [yellow]sort_by(.f)[-]            Sort by field
+  [yellow]flatten[-]                Flatten nested arrays
+  [yellow]to_entries / from_entries[-] Convert to/from [{key,value}]
+  [yellow]add[-]                    Sum numbers / concat arrays
+
+[green::b]jq — String Operations[-:-:-]
+  [yellow]split("/") / join(",")[-] Split/join strings
+  [yellow]startswith / endswith[-]  String prefix/suffix check
+  [yellow]ltrimstr / rtrimstr[-]    Trim string prefix/suffix
+  [yellow]ascii_downcase[-]         Lowercase
+  [yellow]test("regex")[-]          Regex match
+
+[green::b]jq — Special Variables[-:-:-]
+  [yellow]$res[-]                   API response (in merge rules)
+  [yellow]$ctx[-]                   Full context map (in merge/body/transform)
+  [yellow]//[-]                     Alternative: .val // "default"
+  [yellow]|[-]                      Pipe: .items | map(.id)
+
+[green::b]Context Access[-:-:-]
+  [yellow]In Go Templates[-]        {{ .varName }}, {{ .contextName.field }}
+  [yellow]In jq body[-]             .varName, .contextName.field
+  [yellow]In merge rules[-]         $ctx.varName, $res.field
+
+[yellow]Full docs: [::u]https://masterminds.github.io/sprig/[-:-:-] (Sprig)
+           [::u]https://jqlang.github.io/jq/manual/[-:-:-] (jq)
+
+[yellow]Press [::b]f[-:-:-] or [::b]Esc[-:-:-] to close`
+}
+
+func (c *ConsoleApp) toggleFunctionsReference() {
+	if c.pages.HasPage("functions") {
+		c.pages.RemovePage("functions")
+	} else {
+		funcPanel := tview.NewTextView().
+			SetDynamicColors(true).
+			SetScrollable(true).
+			SetText(getFunctionsReferenceText())
+
+		modal := tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(nil, 0, 1, false).
+			AddItem(tview.NewFlex().
+				AddItem(nil, 0, 1, false).
+				AddItem(funcPanel, 80, 1, true).
+				AddItem(nil, 0, 1, false), 0, 14, true).
+			AddItem(nil, 0, 1, false)
+
+		c.pages.AddPage("functions", modal, true, true)
+	}
+}
+
 func (c *ConsoleApp) toggleHelp() {
 	if c.pages.HasPage("help") {
 		c.pages.RemovePage("help")
@@ -887,7 +1021,7 @@ func (c *ConsoleApp) showVariablesModal() {
 
 func (c *ConsoleApp) updateStatusBar() {
 	// Base status bar text
-	statusText := " [yellow]?[-] Help  [yellow]v[-] Vars  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse  [yellow]y[-] Copy"
+	statusText := " [yellow]?[-] Help  [yellow]f[-] Functions  [yellow]v[-] Vars  [yellow]n/N[-] Sibling  [yellow]1/2/3[-] Diff  [yellow]s[-] Stop  [yellow]d[-] Dump  [yellow]r[-] Restart  [yellow]e/c[-] Expand/Collapse  [yellow]y[-] Copy"
 
 	// Add context map shortcut if current event has context data
 	if hasContextMapData(c.currentEventData) {

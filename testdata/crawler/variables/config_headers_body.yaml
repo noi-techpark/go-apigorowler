@@ -10,12 +10,5 @@ steps:
         X-Tenant-Id: "{{ .tenantId }}"
         X-Static: "no-template"
         Content-Type: "application/json"
-      body:
-        query: "{{ .searchTerm }}"
-        filters:
-          category: "{{ .category }}"
-          limit: 10
-        nested:
-          deep:
-            value: "{{ .deepValue }}"
+      body: '{query: "{{ .searchTerm }}", filters: {category: "{{ .category }}", limit: 10}, nested: {deep: {value: "{{ .deepValue }}"}}}'
     resultTransformer: .

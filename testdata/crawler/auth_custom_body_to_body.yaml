@@ -28,7 +28,5 @@ steps:
       method: POST
       headers:
         Content-Type: application/json
-      body:
-        query: "search"
-        limit: 10
+      body: '{query: "search", limit: 10}'
     mergeOn: .result = $res

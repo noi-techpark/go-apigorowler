@@ -91,7 +91,7 @@ func TestCookieAuthenticator(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "cookie",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
 			Headers: map[string]string{
@@ -144,7 +144,7 @@ func TestJWTAuthenticatorFromBody(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "jwt",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
 			Headers: map[string]string{
@@ -185,7 +185,7 @@ func TestJWTAuthenticatorFromHeader(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "jwt",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
 		},
@@ -231,7 +231,7 @@ func TestJWTAuthenticatorRefresh(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "jwt",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
 			Headers: map[string]string{
@@ -286,7 +286,7 @@ func TestCustomAuthenticatorCookieToHeader(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
 		},
@@ -320,7 +320,7 @@ func TestCustomAuthenticatorBodyToquery(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},
@@ -355,7 +355,7 @@ func TestCustomAuthenticatorHeaderToBearer(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/authenticate",
 			Method: "POST",
 		},
@@ -393,7 +393,7 @@ func TestCustomAuthenticatorCookieToCookie(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/login",
 			Method: "POST",
 		},
@@ -566,7 +566,7 @@ func TestCustomAuthenticatorBodyInjectionJSON(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},
@@ -617,7 +617,7 @@ func TestCustomAuthenticatorBodyInjectionFormEncoded(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},
@@ -666,7 +666,7 @@ func TestCustomAuthenticatorBodyInjectionNoExistingBody(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},
@@ -712,7 +712,7 @@ func TestCustomAuthenticatorBodyInjectionNoContentType(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},
@@ -746,7 +746,7 @@ func TestCustomAuthenticatorBodyInjectionEmptyToken(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},
@@ -795,7 +795,7 @@ func TestCustomAuthenticatorBodyInjectionNestedKey(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/subscribe",
 			Method: "POST",
 		},
@@ -849,7 +849,7 @@ func TestCustomAuthenticatorBodyInjectionNestedKeyCreatesPath(t *testing.T) {
 
 	config := AuthenticatorConfig{
 		Type: "custom",
-		LoginRequest: &RequestConfig{
+		LoginRequest: &AuthRequestConfig{
 			URL:    "https://api.example.com/auth",
 			Method: "POST",
 		},

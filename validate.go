@@ -125,7 +125,7 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 		if auth.LoginRequest == nil {
 			errs = append(errs, ValidationError{"auth.loginRequest is required when type is cookie", location + ".loginRequest"})
 		} else {
-			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+			errs = append(errs, validateAuthRequest(*auth.LoginRequest, location+".loginRequest")...)
 		}
 		if auth.ExtractSelector == "" {
 			errs = append(errs, ValidationError{"auth.extractSelector is required when type is cookie", location + ".extractSelector"})
@@ -135,7 +135,7 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 		if auth.LoginRequest == nil {
 			errs = append(errs, ValidationError{"auth.loginRequest is required when type is jwt", location + ".loginRequest"})
 		} else {
-			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+			errs = append(errs, validateAuthRequest(*auth.LoginRequest, location+".loginRequest")...)
 		}
 		if auth.ExtractSelector == "" {
 			errs = append(errs, ValidationError{"auth.extractSelector is required when type is jwt", location + ".extractSelector"})
@@ -148,7 +148,7 @@ func validateAuth(auth AuthenticatorConfig, location string) []ValidationError {
 		if auth.LoginRequest == nil {
 			errs = append(errs, ValidationError{"auth.loginRequest is required when type is custom", location + ".loginRequest"})
 		} else {
-			errs = append(errs, validateRequest(*auth.LoginRequest, location+".loginRequest")...)
+			errs = append(errs, validateAuthRequest(*auth.LoginRequest, location+".loginRequest")...)
 		}
 		if auth.ExtractFrom == "" {
 			errs = append(errs, ValidationError{"auth.extractFrom is required when type is custom", location + ".extractFrom"})
@@ -345,6 +345,44 @@ func validateRequest(req RequestConfig, location string) []ValidationError {
 	}
 
 	// headers and body can be left as is for now
+
+	return errs
+}
+
+// validateAuthRequest validates an authentication login request configuration
+func validateAuthRequest(req AuthRequestConfig, location string) []ValidationError {
+	var errs []ValidationError
+
+	if req.URL == "" {
+		errs = append(errs, ValidationError{"request.url is required", location + ".url"})
+	}
+	if req.Method == "" {
+		errs = append(errs, ValidationError{"request.method is required", location + ".method"})
+	} else {
+		m := strings.ToUpper(req.Method)
+		if m != "GET" && m != "POST" {
+			errs = append(errs, ValidationError{"request.method must be GET or POST", location + ".method"})
+		}
+
+		// POST requests with body must specify Content-Type in headers
+		if m == "POST" && len(req.Body) > 0 {
+			hasContentType := false
+			if req.Headers != nil {
+				for key := range req.Headers {
+					if strings.ToLower(key) == "content-type" {
+						hasContentType = true
+						break
+					}
+				}
+			}
+			if !hasContentType {
+				errs = append(errs, ValidationError{
+					"POST requests with body must specify Content-Type in headers",
+					location + ".headers",
+				})
+			}
+		}
+	}
 
 	return errs
 }

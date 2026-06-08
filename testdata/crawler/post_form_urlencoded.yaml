@@ -16,8 +16,6 @@ steps:
         # Silky will encode body as: username=admin&password=secret123
         Content-Type: application/x-www-form-urlencoded
       # Body will be automatically URL-encoded based on Content-Type
-      body:
-        username: admin
-        password: secret123
+      body: '{username: "admin", password: "secret123"}'
     # Append login response to results array
     mergeOn: .results += [$res]

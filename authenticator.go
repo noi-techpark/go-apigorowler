@@ -163,7 +163,7 @@ type AuthenticatorConfig struct {
 	OAuthConfig `yaml:",inline" json:",inline"`
 
 	// Cookie/JWT/Custom auth
-	LoginRequest    *RequestConfig `yaml:"loginRequest,omitempty" json:"loginRequest,omitempty"`
+	LoginRequest    *AuthRequestConfig `yaml:"loginRequest,omitempty" json:"loginRequest,omitempty"`
 	ExtractFrom     string         `yaml:"extractFrom,omitempty" json:"extractFrom,omitempty"`         // cookie | header | body
 	ExtractSelector string         `yaml:"extractSelector,omitempty" json:"extractSelector,omitempty"` // jq for body, name for cookie/header
 	InjectInto      string         `yaml:"injectInto,omitempty" json:"injectInto,omitempty"`           // cookie | header | bearer | body | query
@@ -366,7 +366,7 @@ func (a *OAuthAuthenticator) GetTokenWithCache(requestID string) (string, bool, 
 // CookieAuthenticator - performs login via POST, extracts cookie, injects it
 type CookieAuthenticator struct {
 	*BaseAuthenticator
-	loginRequest  *RequestConfig
+	loginRequest  *AuthRequestConfig
 	cookieName    string
 	cookie        *http.Cookie
 	maxAge        time.Duration
@@ -517,7 +517,7 @@ func (a *CookieAuthenticator) buildLoginRequest() (*http.Request, error) {
 // JWTAuthenticator - performs login via POST, extracts JWT from response
 type JWTAuthenticator struct {
 	*BaseAuthenticator
-	loginRequest    *RequestConfig
+	loginRequest    *AuthRequestConfig
 	extractFrom     string // header | body
 	extractSelector string // jq expression for body, header name for header
 	token           string
@@ -729,7 +729,7 @@ func (a *JWTAuthenticator) buildLoginRequest() (*http.Request, error) {
 // CustomAuthenticator - fully configurable authenticator
 type CustomAuthenticator struct {
 	*BaseAuthenticator
-	loginRequest    *RequestConfig
+	loginRequest    *AuthRequestConfig
 	extractFrom     string // cookie | header | body
 	extractSelector string
 	injectInto      string // cookie | header | bearer | body | query

@@ -82,6 +82,12 @@
         "category": "Silky"
       },
       {
+        "command": "silky.showFunctionsReference",
+        "title": "Functions Reference",
+        "icon": "$(book)",
+        "category": "Silky"
+      },
+      {
         "command": "silky.setVariables",
         "title": "Set Runtime Variables",
         "icon": "$(symbol-variable)",
@@ -116,9 +122,45 @@
         "title": "Clear All Variables",
         "icon": "$(clear-all)",
         "category": "Silky"
+      },
+      {
+        "command": "silky.addEnvVariable",
+        "title": "Add Environment Variable",
+        "icon": "$(add)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.editEnvVariable",
+        "title": "Edit Environment Variable",
+        "icon": "$(edit)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.removeEnvVariable",
+        "title": "Remove Environment Variable",
+        "icon": "$(trash)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.clearEnvVariables",
+        "title": "Clear All Environment Variables",
+        "icon": "$(clear-all)",
+        "category": "Silky"
+      },
+      {
+        "command": "silky.showVariablesHelp",
+        "title": "Variables Help",
+        "icon": "$(question)",
+        "category": "Silky"
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "silky.showFunctionsReference",
+          "when": "false"
+        }
+      ],
       "editor/title": [
         {
           "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
@@ -137,7 +179,7 @@
         },
         {
           "when": "resourceLangId == yaml && resourcePath =~ /\\.silky\\.ya?ml$/",
-          "command": "silky.setVariables",
+          "command": "silky.showFunctionsReference",
           "group": "navigation@4"
         }
       ],
@@ -158,6 +200,11 @@
           "group": "navigation@3"
         },
         {
+          "command": "silky.showFunctionsReference",
+          "when": "view == silky.stepsExplorer",
+          "group": "navigation@0"
+        },
+        {
           "command": "silky.addVariable",
           "when": "view == silky.variablesExplorer",
           "group": "navigation@1"
@@ -166,6 +213,26 @@
           "command": "silky.clearVariables",
           "when": "view == silky.variablesExplorer",
           "group": "navigation@2"
+        },
+        {
+          "command": "silky.showVariablesHelp",
+          "when": "view == silky.variablesExplorer",
+          "group": "navigation@3"
+        },
+        {
+          "command": "silky.addEnvVariable",
+          "when": "view == silky.envExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "silky.clearEnvVariables",
+          "when": "view == silky.envExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "silky.showVariablesHelp",
+          "when": "view == silky.envExplorer",
+          "group": "navigation@3"
         }
       ],
       "view/item/context": [
@@ -183,6 +250,16 @@
           "command": "silky.removeVariable",
           "when": "view == silky.variablesExplorer && viewItem == variable",
           "group": "inline@2"
+        },
+        {
+          "command": "silky.editEnvVariable",
+          "when": "view == silky.envExplorer && viewItem == variable",
+          "group": "inline@1"
+        },
+        {
+          "command": "silky.removeEnvVariable",
+          "when": "view == silky.envExplorer && viewItem == variable",
+          "group": "inline@2"
         }
       ]
     },
@@ -196,9 +273,15 @@
         },
         {
           "id": "silky.variablesExplorer",
-          "name": "Variables",
+          "name": "Runtime Variables",
           "icon": "$(symbol-variable)",
           "contextualTitle": "Runtime Variables"
+        },
+        {
+          "id": "silky.envExplorer",
+          "name": "Environment Variables",
+          "icon": "$(server-environment)",
+          "contextualTitle": "Environment Variables"
         }
       ],
       "silky-panel": [

@@ -5,6 +5,31 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Run Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/vscode-extension/dist/**/*.js"
+            ],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "Extension Tests",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
+                "--extensionTestsPath=${workspaceFolder}/vscode-extension/dist/test/suite/index"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/vscode-extension/dist/test/**/*.js"
+            ],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
             "name": "Attach to Delve",
             "type": "go",
             "request": "attach",
@@ -13,6 +38,6 @@
             "port": 2345,
             "host": "127.0.0.1",
             "showLog": true
-        },
+        }
     ]
 }

@@ -8,12 +8,15 @@ import { CrawlerRunner } from './crawlerRunner';
 import { StepDetailsPanel } from './stepDetailsPanel';
 import { TimelineViewProvider } from './timelineViewProvider';
 import { VariablesTreeProvider, VariableTreeItem } from './variablesTreeProvider';
+import { FunctionsReferencePanel } from './functionsReferencePanel';
+import { VariablesHelpPanel } from './variablesHelpPanel';
 import * as Diff from 'diff';
 
 let crawlerRunner: CrawlerRunner | undefined;
 let stepsTreeProvider: StepsTreeProvider | undefined;
 let timelineViewProvider: TimelineViewProvider | undefined;
 let variablesTreeProvider: VariablesTreeProvider | undefined;
+let envTreeProvider: VariablesTreeProvider | undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('Silky extension is now active');
@@ -38,6 +41,16 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(variablesTreeView);
+
+    // Initialize environment variables tree provider (managed like runtime
+    // variables, but injected into the crawler process env so ${VAR} resolves).
+    envTreeProvider = new VariablesTreeProvider();
+    const envTreeView = vscode.window.createTreeView('silky.envExplorer', {
+        treeDataProvider: envTreeProvider,
+        showCollapseAll: true
+    });
+
+    context.subscriptions.push(envTreeView);
 
     // Create output channel for timeline debugging
     const timelineOutputChannel = vscode.window.createOutputChannel('Silky Timeline');
@@ -149,6 +162,40 @@ export function activate(context: vscode.ExtensionContext) {
         return { key, value };
     };
 
+    // Helper to prompt for a single environment variable (string value only)
+    const promptForEnvVariable = async (existingKey?: string, existingValue?: string): Promise<{ key: string; value: string } | undefined> => {
+        const key = await vscode.window.showInputBox({
+            prompt: 'Enter environment variable name',
+            value: existingKey || '',
+            placeHolder: 'API_TOKEN',
+            validateInput: (value) => {
+                if (!value || value.trim() === '') {
+                    return 'Variable name is required';
+                }
+                if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+                    return 'Environment variable name must be a valid identifier';
+                }
+                return null;
+            }
+        });
+
+        if (!key) {
+            return undefined;
+        }
+
+        const value = await vscode.window.showInputBox({
+            prompt: `Enter value for "${key}" (referenced in YAML as \${${key}})`,
+            value: existingValue !== undefined ? existingValue : '',
+            placeHolder: 'plain text value'
+        });
+
+        if (value === undefined) {
+            return undefined;
+        }
+
+        return { key, value };
+    };
+
     // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('silky.run', async () => {
@@ -159,7 +206,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             await document.save();
-            await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables());
+            await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables(), envTreeProvider?.getVariables() as Record<string, string> | undefined);
         })
     );
 
@@ -259,6 +306,64 @@ export function activate(context: vscode.ExtensionContext) {
         })
     );
 
+    // addEnvVariable - add a single environment variable
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.addEnvVariable', async () => {
+            const result = await promptForEnvVariable();
+            if (result) {
+                envTreeProvider?.addVariable(result.key, result.value);
+            }
+        })
+    );
+
+    // editEnvVariable - edit an existing environment variable
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.editEnvVariable', async (item: VariableTreeItem) => {
+            if (!item || !item.isRoot) {
+                return;
+            }
+            const result = await promptForEnvVariable(item.key, String(item.value));
+            if (result) {
+                // Remove old key if renamed
+                if (result.key !== item.key) {
+                    envTreeProvider?.removeVariable(item.key);
+                }
+                envTreeProvider?.addVariable(result.key, result.value);
+            }
+        })
+    );
+
+    // removeEnvVariable - remove a single environment variable
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.removeEnvVariable', async (item: VariableTreeItem) => {
+            if (!item || !item.isRoot) {
+                return;
+            }
+            envTreeProvider?.removeVariable(item.key);
+        })
+    );
+
+    // clearEnvVariables - remove all environment variables
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.clearEnvVariables', async () => {
+            const confirm = await vscode.window.showWarningMessage(
+                'Clear all environment variables?',
+                { modal: true },
+                'Clear'
+            );
+            if (confirm === 'Clear') {
+                envTreeProvider?.clearVariables();
+            }
+        })
+    );
+
+    // showVariablesHelp - open the side-by-side usage help webview
+    context.subscriptions.push(
+        vscode.commands.registerCommand('silky.showVariablesHelp', () => {
+            VariablesHelpPanel.createOrShow(context.extensionUri);
+        })
+    );
+
     context.subscriptions.push(
         vscode.commands.registerCommand('silky.runWithVariables', async () => {
             const document = await getSilkyDocument();
@@ -281,7 +386,7 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             await document.save();
-            await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables());
+            await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables(), envTreeProvider?.getVariables() as Record<string, string> | undefined);
         })
     );
 
@@ -425,6 +530,12 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('silky.showFunctionsReference', () => {
+            FunctionsReferencePanel.createOrShow(context.extensionUri);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('silky.convertToSilkyYaml', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
@@ -529,7 +640,7 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.workspace.onDidSaveTextDocument(async (document) => {
             const config = vscode.workspace.getConfiguration('silky');
             if (config.get('autoRun') && isSilkyFile(document)) {
-                await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables());
+                await crawlerRunner?.run(document.uri.fsPath, variablesTreeProvider?.getVariables(), envTreeProvider?.getVariables() as Record<string, string> | undefined);
             }
         })
     );

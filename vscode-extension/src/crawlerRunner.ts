@@ -24,7 +24,7 @@ export class CrawlerRunner {
         this.context.subscriptions.push(this.diagnosticCollection);
     }
 
-    async run(configPath: string, variables?: Record<string, any>): Promise<void> {
+    async run(configPath: string, variables?: Record<string, any>, envVars?: Record<string, string>): Promise<void> {
         this.stop();
         this.stepsProvider.clear();
         this.timelineProvider.clear();
@@ -42,6 +42,9 @@ export class CrawlerRunner {
         this.outputChannel.appendLine(`Using Go executable: ${goPath}`);
         if (variables && Object.keys(variables).length > 0) {
             this.outputChannel.appendLine(`Variables: ${JSON.stringify(variables)}`);
+        }
+        if (envVars && Object.keys(envVars).length > 0) {
+            this.outputChannel.appendLine(`Environment: ${Object.keys(envVars).join(', ')}`);
         }
         this.outputChannel.appendLine('---');
 
@@ -88,7 +91,9 @@ export class CrawlerRunner {
 
                     this.currentProcess = cp.spawn(command, args, {
                         cwd,
-                        env: { ...process.env }
+                        // Session-managed environment variables override the inherited
+                        // process env so ${VAR} expands without exporting in a shell.
+                        env: { ...process.env, ...envVars }
                     });
 
                     let outputLines = 0;

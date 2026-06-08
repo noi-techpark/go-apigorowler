@@ -171,57 +171,12 @@ type CompiledMerge struct {
 	SourceRule string      // Original rule string for profiling
 }
 
-// CompiledBodyTemplates holds compiled templates for a request body.
-// Structure mirrors the body map structure with templates replacing string values.
-type CompiledBodyTemplates struct {
-	Templates map[string]*CompiledBodyValue
-}
-
-// CompiledBodyValue represents a body value that may contain templates.
-// It mirrors the recursive structure of request bodies.
-type CompiledBodyValue struct {
-	// One of the following will be set:
-	StringTemplate *CompiledTemplate             // For string values with templates
-	Literal        any                           // For non-template values (numbers, bools, etc.)
-	Map            map[string]*CompiledBodyValue // For nested objects
-	Array          []*CompiledBodyValue          // For arrays
-}
-
-// Execute expands all templates in the body value recursively.
-func (c *CompiledBodyValue) Execute(ctx map[string]any) (any, error) {
-	if c == nil {
-		return nil, nil
-	}
-
-	if c.StringTemplate != nil {
-		return c.StringTemplate.Execute(ctx)
-	}
-	if c.Literal != nil {
-		return c.Literal, nil
-	}
-	if c.Map != nil {
-		result := make(map[string]any, len(c.Map))
-		for k, v := range c.Map {
-			expanded, err := v.Execute(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("error expanding body key '%s': %w", k, err)
-			}
-			result[k] = expanded
-		}
-		return result, nil
-	}
-	if c.Array != nil {
-		result := make([]any, len(c.Array))
-		for i, v := range c.Array {
-			expanded, err := v.Execute(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("error expanding body index %d: %w", i, err)
-			}
-			result[i] = expanded
-		}
-		return result, nil
-	}
-	return nil, nil
+// CompiledBody holds the compiled body expression.
+// Body is a jq expression optionally preceded by Sprig template expansion.
+type CompiledBody struct {
+	Template *CompiledTemplate // Sprig template (first pass, nil if no {{ }} markers)
+	JQ       *CompiledJQ       // jq expression (second pass, nil if body has templates — compiled at runtime)
+	RawBody  string            // Original body string (used for runtime jq compilation when templates present)
 }
 
 // CompiledStep holds all pre-compiled expressions for a single step.
@@ -232,7 +187,7 @@ type CompiledStep struct {
 	// Request step compilations
 	URLTemplate     *CompiledTemplate            // URL template
 	HeaderTemplates map[string]*CompiledTemplate // Header value templates
-	BodyTemplates   *CompiledBodyTemplates       // Body value templates
+	Body            *CompiledBody                // Body jq expression (with optional template pre-expansion)
 
 	// Transform and merge compilations
 	ResultTransformer *CompiledJQ    // Response transformation (.resultTransformer)
@@ -295,20 +250,47 @@ func (cs *CompiledStep) ExecuteHeaderTemplates(ctx map[string]any) (map[string]s
 	return result, nil
 }
 
-// ExecuteBodyTemplates expands all body templates with the given context.
-func (cs *CompiledStep) ExecuteBodyTemplates(ctx map[string]any) (map[string]any, error) {
-	if cs == nil || cs.BodyTemplates == nil || cs.BodyTemplates.Templates == nil {
-		return map[string]any{}, nil
+// ExecuteBody evaluates the body jq expression with optional Sprig template pre-expansion.
+// Returns the result as a map[string]any suitable for JSON encoding.
+func (cs *CompiledStep) ExecuteBody(ctx map[string]any) (map[string]any, error) {
+	if cs == nil || cs.Body == nil {
+		return nil, nil
 	}
-	result := make(map[string]any, len(cs.BodyTemplates.Templates))
-	for k, v := range cs.BodyTemplates.Templates {
-		expanded, err := v.Execute(ctx)
+
+	var jqCode *CompiledJQ
+
+	if cs.Body.Template != nil {
+		// Has Sprig templates — expand first, then compile jq at runtime
+		expanded, err := cs.Body.Template.Execute(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("error in body field '%s': %w", k, err)
+			return nil, fmt.Errorf("error expanding body template: %w", err)
 		}
-		result[k] = expanded
+		jqCode, err = compileJQ(expanded, JQ_CTX_KEY)
+		if err != nil {
+			return nil, fmt.Errorf("error compiling body jq after template expansion: %w", err)
+		}
+	} else if cs.Body.JQ != nil {
+		// No templates — use pre-compiled jq
+		jqCode = cs.Body.JQ
+	} else {
+		return nil, nil
 	}
-	return result, nil
+
+	result, err := jqCode.Run(ctx, ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error executing body jq: %w", err)
+	}
+
+	if result == nil {
+		return nil, nil
+	}
+
+	resultMap, ok := result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("body expression must produce an object, got %T", result)
+	}
+
+	return resultMap, nil
 }
 
 // CompiledConfig holds the fully compiled configuration.
@@ -422,51 +404,38 @@ func containsSubstring(s, substr string) bool {
 	return false
 }
 
-// compileBodyValue recursively compiles template strings in a body value.
-func compileBodyValue(v any) (*CompiledBodyValue, []string, error) {
+// compileBody compiles a body jq expression with optional Sprig template pre-expansion.
+func compileBody(body string) (*CompiledBody, []string, error) {
+	if body == "" {
+		return nil, nil, nil
+	}
+
+	cb := &CompiledBody{RawBody: body}
 	var allFields []string
 
-	switch val := v.(type) {
-	case string:
-		tmpl, err := compileTemplate(val)
-		if err != nil {
-			return nil, nil, err
-		}
-		if tmpl != nil {
-			allFields = append(allFields, tmpl.UsedFields...)
-			return &CompiledBodyValue{StringTemplate: tmpl}, allFields, nil
-		}
-		// Non-template string, store as literal
-		return &CompiledBodyValue{Literal: val}, nil, nil
-
-	case map[string]any:
-		compiled := make(map[string]*CompiledBodyValue, len(val))
-		for k, v := range val {
-			cv, fields, err := compileBodyValue(v)
-			if err != nil {
-				return nil, nil, fmt.Errorf("in field '%s': %w", k, err)
-			}
-			compiled[k] = cv
-			allFields = append(allFields, fields...)
-		}
-		return &CompiledBodyValue{Map: compiled}, allFields, nil
-
-	case []any:
-		compiled := make([]*CompiledBodyValue, len(val))
-		for i, v := range val {
-			cv, fields, err := compileBodyValue(v)
-			if err != nil {
-				return nil, nil, fmt.Errorf("at index %d: %w", i, err)
-			}
-			compiled[i] = cv
-			allFields = append(allFields, fields...)
-		}
-		return &CompiledBodyValue{Array: compiled}, allFields, nil
-
-	default:
-		// Non-string primitives (numbers, bools, nil)
-		return &CompiledBodyValue{Literal: val}, nil, nil
+	// Check if body contains Sprig template markers
+	tmpl, err := compileTemplate(body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("body template: %w", err)
 	}
+
+	if tmpl != nil {
+		// Has templates — jq will be compiled at runtime after template expansion
+		cb.Template = tmpl
+		allFields = append(allFields, tmpl.UsedFields...)
+	} else {
+		// No templates — pre-compile jq now for performance
+		jq, err := compileJQ(body, JQ_CTX_KEY)
+		if err != nil {
+			return nil, nil, fmt.Errorf("body jq: %w", err)
+		}
+		cb.JQ = jq
+		if jq != nil {
+			allFields = append(allFields, jq.UsedPaths...)
+		}
+	}
+
+	return cb, allFields, nil
 }
 
 // CompileStep compiles all expressions in a step and its nested steps.
@@ -504,19 +473,14 @@ func CompileStep(step *Step, stepPath string) (*CompiledStep, []string, error) {
 			}
 		}
 
-		// Body templates
-		if len(step.Request.Body) > 0 {
-			cs.BodyTemplates = &CompiledBodyTemplates{
-				Templates: make(map[string]*CompiledBodyValue, len(step.Request.Body)),
+		// Body jq expression
+		if step.Request.Body != "" {
+			var bodyFields []string
+			cs.Body, bodyFields, err = compileBody(step.Request.Body)
+			if err != nil {
+				return nil, nil, fmt.Errorf("body: %w", err)
 			}
-			for k, v := range step.Request.Body {
-				cv, fields, err := compileBodyValue(v)
-				if err != nil {
-					return nil, nil, fmt.Errorf("body field '%s': %w", k, err)
-				}
-				cs.BodyTemplates.Templates[k] = cv
-				allFields = append(allFields, fields...)
-			}
+			allFields = append(allFields, bodyFields...)
 		}
 	}
 

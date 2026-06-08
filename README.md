@@ -267,12 +267,11 @@ All Go template fields (URLs, headers, body values) support the full [Sprig](htt
 
 ### Practical Examples
 
-**Timestamp formatting** (e.g., .NET `/Date()` pattern):
+**Timestamp formatting** (e.g., .NET `/Date()` pattern) — templates expand first, then jq builds the object:
 ```yaml
-body:
-  request:
-    fromData: '{{ printf "/Date(%d000+0000)/" .from }}'
-    toData: '{{ printf "/Date(%d000+0000)/" .to }}'
+body: >-
+  {fromData: "{{ printf "/Date(%d000+0000)/" .from }}",
+   toData: "{{ printf "/Date(%d000+0000)/" .to }}"}
 ```
 
 **Math operations:**
@@ -291,9 +290,9 @@ request:
 
 **String manipulation:**
 ```yaml
-body:
-  name: '{{ .input | trim | upper }}'
-  slug: '{{ .title | lower | replace " " "-" }}'
+body: >-
+  {name: "{{ .input | trim | upper }}",
+   slug: "{{ .title | lower | replace " " "-" }}"}
 ```
 
 **Base64 encoding:**
@@ -333,7 +332,7 @@ Variables are passed as a `map[string]any` to the `Run()` method and are accessi
 
 1. **URL templates**: Use `{{ .variableName }}`
 2. **Headers**: Use `{{ .variableName }}`
-3. **Request body**: Use `{{ .variableName }}` (recursively in nested objects)
+3. **Request body** (jq expression): Use `$ctx.variableName` (or `.variableName`); a `{{ .variableName }}` template inside the body string is also expanded first
 4. **Merge rules (JQ expressions)**: Use `$ctx.variableName`
 
 Variables are injected at the root level of the template context with highest priority, meaning they override any context values with the same name.
@@ -361,11 +360,9 @@ steps:
       headers:
         Authorization: "Bearer {{ .apiKey }}"
         Content-Type: application/json
-      body:
-        query: "{{ .searchTerm }}"
-        filters:
-          startDate: "{{ .startFrom }}"
-          endDate: "{{ .endTo }}"
+      body: >-
+        {query: $ctx.searchTerm,
+         filters: {startDate: $ctx.startFrom, endDate: $ctx.endTo}}
     resultTransformer: |
       .items | map(select(.category == $ctx.category))
 ```
@@ -505,6 +502,8 @@ rootContext: []
 ### AuthenticationStruct
 
 Silky supports multiple authentication mechanisms to handle diverse API authentication patterns.
+
+> **`loginRequest` body differs from request steps.** The `cookie`, `jwt`, and `custom` types take a `loginRequest` with the same `url` / `method` / `headers` / `body` fields as a request step — **except** its `body` is a **static key/value map** (as shown in the examples below), not a jq expression. Only request-step bodies use the jq form documented in [RequestStruct](#requeststruct).
 
 #### Common Fields
 
@@ -886,11 +885,13 @@ Defines an HTTP request configuration.
 | `url`        | go-template string   | **Required.** Request URL with template support |
 | `method`     | string (`GET` \| `POST`) | **Required.** HTTP method |
 | `headers`    | map<string, string>  | Optional headers (use `Content-Type` here for POST body type) |
-| `body`       | map<string, any>     | Optional request body            |
+| `body`       | jq expression (string) | Optional request body. A jq expression evaluated against the current context; must produce an object. See [Request Body](#request-body) below. |
 | `pagination` | [PaginationStruct](#paginationstruct) | Optional pagination config |
 | `auth`       | [AuthenticationStruct](#authenticationstruct) | Optional override authentication |
 
-**Important:** For POST requests with a body, specify `Content-Type` in the `headers` map:
+#### Request Body
+
+The `body` is a **jq expression string** evaluated against the current context, and must produce an object. This lets the body pull and transform data from the context — including building arrays from prior results (an "accumulation" pattern) — not just interpolate scalar values.
 
 ```yaml
 request:
@@ -898,13 +899,38 @@ request:
   method: POST
   headers:
     Content-Type: application/json
-  body:
-    key: value
+  # jq object literal — note string values are quoted
+  body: '{key: "value", limit: 10, active: true}'
 ```
+
+**Two-pass evaluation.** If the body contains Go template markers (`{{ ... }}`), they are expanded **first** (Sprig templates, against the context), and the resulting string is then evaluated as jq. Bodies without `{{ }}` are pre-compiled at validation time for speed.
+
+```yaml
+# Sprig templates expand first, then jq builds the object
+body: >-
+  {start: "{{ now | date "2006-01-02" }}", page: {{ .page }}}
+```
+
+**Accumulation / batching.** Because jq sees the whole context, you can collect values from earlier steps into a single request — e.g. batch every id from a previously fetched list into one call:
+
+```yaml
+# .rooms was populated by an earlier step; send all ids in one request
+body: '{roomIds: [.rooms[].id], includeBooked: true}'
+```
+
+**Notes**
+- The expression **must** evaluate to an object (a jq object literal `{...}`), otherwise the run fails with `body expression must produce an object`.
+- Native JSON types are preserved — `true`/`10` become a real boolean/number, not strings.
+- Runtime variables are available as `$ctx.name` (or `.name`); see [Runtime Variables](#runtime-variables).
+- Pagination body params (see [PaginationParamsStruct](#paginationparamsstruct)) are merged in **after** the body jq and override any keys it produced.
+
+**Important:** For POST requests with a body, specify `Content-Type` in the `headers` map.
 
 Supported Content-Types:
 - `application/json` - Body will be JSON-encoded
 - `application/x-www-form-urlencoded` - Body will be form-encoded
+
+> **Note:** Authentication login requests ([`loginRequest`](#authenticationstruct)) use a **static key/value map** for their body, not a jq expression — see those examples below.
 
 ---
 

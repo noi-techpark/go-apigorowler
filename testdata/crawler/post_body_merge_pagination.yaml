@@ -13,11 +13,8 @@ steps:
       method: POST
       headers:
         Content-Type: application/json
-      # POST body with static search parameters
-      body:
-        query: "golang"
-        filters:
-          category: "programming"
+      # POST body with static search parameters (jq expression)
+      body: '{query: "golang", filters: {category: "programming"}}'
       # Pagination configuration
       pagination:
         # Stop after 2 pages (pages 0 and 1)

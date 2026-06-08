@@ -173,14 +173,40 @@
           "additionalProperties": { "type": "string" }
         },
         "body": {
-          "type": "object",
-          "description": "Request body parameters. Encoding determined by Content-Type header (application/json or application/x-www-form-urlencoded)"
+          "type": "string",
+          "description": "Request body as a jq expression evaluated against the current context (must produce an object), e.g. '{roomIds: [.rooms[].id], active: true}'. Supports Sprig templates ({{ ... }}) expanded before jq. Encoding determined by Content-Type header (application/json or application/x-www-form-urlencoded)"
         },
         "pagination": {
           "$ref": "#/definitions/Pagination"
         },
         "auth": {
           "$ref": "#/definitions/AuthenticatorConfig"
+        }
+      },
+      "required": ["url", "method"]
+    },
+    "AuthRequestConfig": {
+      "type": "object",
+      "description": "Authentication login request. Unlike request steps, its body is a static key/value map (not a jq expression)",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Login endpoint URL"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST"],
+          "description": "HTTP method",
+          "default": "POST"
+        },
+        "headers": {
+          "type": "object",
+          "description": "Login request headers. POST with body requires Content-Type header",
+          "additionalProperties": { "type": "string" }
+        },
+        "body": {
+          "type": "object",
+          "description": "Login request body as a static key/value map. Encoding determined by Content-Type header"
         }
       },
       "required": ["url", "method"]
@@ -228,7 +254,7 @@
           "items": { "type": "string" }
         },
         "loginRequest": {
-          "$ref": "#/definitions/RequestConfig",
+          "$ref": "#/definitions/AuthRequestConfig",
           "description": "Login request configuration (for cookie, jwt, custom auth)"
         },
         "extractFrom": {

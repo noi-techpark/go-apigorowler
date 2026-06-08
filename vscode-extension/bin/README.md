@@ -9,7 +9,7 @@ This directory contains pre-built binaries for different platforms.
 - **darwin/amd64**: `silky-darwin-amd64` (10.70 MB)
 - **darwin/arm64**: `silky-darwin-arm64` (10.01 MB)
 - **windows/amd64**: `silky-windows-amd64.exe` (10.76 MB)
-- **windows/arm64**: `silky-windows-arm64.exe` (9.86 MB)
+- **windows/arm64**: `silky-windows-arm64.exe` (9.85 MB)
 
 ## Usage
 

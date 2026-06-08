@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -1335,7 +1336,7 @@ steps:
 }
 
 func TestSprigFunctionsInBody(t *testing.T) {
-	// YAML config using sprig functions in body templates
+	// YAML config using sprig functions in body jq expression
 	configContent := `
 rootContext: {}
 steps:
@@ -1346,11 +1347,11 @@ steps:
       method: POST
       headers:
         Content-Type: application/json
-      body:
-        fromData: '{{ printf "/Date(%d000+0000)/" .from }}'
-        toData: '{{ printf "/Date(%d000+0000)/" .to }}'
-        label: '{{ upper .name }}'
-        offset: '{{ add .page 10 }}'
+      body: >-
+        {fromData: "{{ printf "/Date(%d000+0000)/" .from }}",
+         toData: "{{ printf "/Date(%d000+0000)/" .to }}",
+         label: "{{ upper .name }}",
+         offset: "{{ add .page 10 }}"}
     mergeOn: .result = $res
 `
 	tmpDir := t.TempDir()
@@ -1407,6 +1408,101 @@ steps:
 	resultMap, ok := data.(map[string]interface{})
 	require.True(t, ok, "Result should be a map")
 	require.NotNil(t, resultMap["result"])
+}
+
+func TestBodyJQBatchAccumulation(t *testing.T) {
+	// Test the accumulator pattern: fetch rooms, then batch all room IDs into a single request
+	configContent := `
+rootContext: {}
+steps:
+  - type: request
+    name: "Get rooms"
+    request:
+      url: https://api.example.com/rooms
+      method: GET
+    mergeOn: ".rooms = $res"
+
+  - type: request
+    name: "Batch events query"
+    request:
+      url: https://api.example.com/events
+      method: POST
+      headers:
+        Content-Type: application/json
+      body: '{roomIds: [.rooms[].id], active: true}'
+    mergeOn: ".events = $res"
+`
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	err := os.WriteFile(configPath, []byte(configContent), 0644)
+	require.Nil(t, err)
+
+	// First request returns rooms
+	roomsResponse := []interface{}{
+		map[string]interface{}{"id": "room-1", "name": "Conference A"},
+		map[string]interface{}{"id": "room-2", "name": "Conference B"},
+		map[string]interface{}{"id": "room-3", "name": "Meeting Room"},
+	}
+
+	eventsResponse := []interface{}{
+		map[string]interface{}{"id": "evt-1", "title": "Meeting"},
+		map[string]interface{}{"id": "evt-2", "title": "Workshop"},
+	}
+
+	mockTransport := crawler_testing.NewMockRoundTripperWithResponse(map[string]interface{}{
+		"https://api.example.com/rooms":  roomsResponse,
+		"https://api.example.com/events": eventsResponse,
+	})
+
+	// Verify the body of the events request contains the batched room IDs
+	mockTransport.InterceptFunc = func(req *http.Request, resp *http.Response) {
+		if req.URL.Path == "/events" {
+			bodyBytes, _ := io.ReadAll(req.Body)
+			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			var body map[string]any
+			err := json.Unmarshal(bodyBytes, &body)
+			if err != nil {
+				panic("Failed to parse events request body: " + err.Error())
+			}
+
+			// Verify roomIds is a proper JSON array with all 3 room IDs
+			roomIds, ok := body["roomIds"].([]interface{})
+			if !ok {
+				panic("Expected roomIds to be an array")
+			}
+			if len(roomIds) != 3 {
+				panic(fmt.Sprintf("Expected 3 roomIds, got %d", len(roomIds)))
+			}
+			if roomIds[0] != "room-1" || roomIds[1] != "room-2" || roomIds[2] != "room-3" {
+				panic(fmt.Sprintf("Unexpected roomIds: %v", roomIds))
+			}
+
+			// Verify active is a proper boolean (not a string)
+			active, ok := body["active"].(bool)
+			if !ok || !active {
+				panic("Expected active to be true (boolean)")
+			}
+		}
+	}
+
+	craw, _, err := NewApiCrawler(configPath)
+	require.Nil(t, err)
+
+	client := &http.Client{Transport: mockTransport}
+	craw.SetClient(client)
+
+	err = craw.Run(context.TODO(), nil)
+	require.Nil(t, err)
+
+	data := craw.GetData()
+	resultMap, ok := data.(map[string]interface{})
+	require.True(t, ok)
+	require.NotNil(t, resultMap["rooms"])
+	require.NotNil(t, resultMap["events"])
+
+	events := resultMap["events"].([]interface{})
+	require.Equal(t, 2, len(events))
 }
 
 func TestDefaultMergeMapContextArrayResult(t *testing.T) {
